@@ -1,0 +1,30 @@
+{
+    "name": "Base Tokens",
+    "description": "Essential tokens on the Base Network including native wrapped assets, bridged stablecoins, and staking derivatives",
+    "version": {
+      "major": 1,
+      "minor": 0,
+      "patch": 0
+    },
+    "timestamp": "2025-07-11T06:49:31Z",
+    "logoURI": "",
+    "keywords": ["tokens", "defi", "base"],
+    "tokens": [
+      {
+        "name": "Albion Wressle-1 4.5% Royalty",
+        "symbol": "ALB-WR1-R1",
+        "address": "0xf836a500910453A397084ADe41321ee20a5AAde1",
+        "decimals": 18,
+        "chainId": 8453,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png"
+      },
+      {
+        "name": "Albion Wressle-1 4.5% Royalty Investor Preview",
+        "symbol": "ALB-WR1-R2",
+        "address": "0x1d57246fd0ba134d7cc78ddf3ed829379d95f4b7",
+        "decimals": 18,
+        "chainId": 8453,
+        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xdAC17F958D2ee523a2206206994597C13D831ec7/logo.png"
+      }
+    ]
+  }
