@@ -1,6 +1,6 @@
-https://raw.githubusercontent.com/albionlabs/albion.registry/02d7b91bc0f8cc03916ce3479d96779965c95a10/settings.yaml
-fixed-limit https://raw.githubusercontent.com/albionlabs/albion.registry/02d7b91bc0f8cc03916ce3479d96779965c95a10/src/fixed-limit.rain
-auction-dca https://raw.githubusercontent.com/albionlabs/albion.registry/02d7b91bc0f8cc03916ce3479d96779965c95a10/src/auction-dca.rain
-grid https://raw.githubusercontent.com/albionlabs/albion.registry/02d7b91bc0f8cc03916ce3479d96779965c95a10/src/grid.rain
-dynamic-spread https://raw.githubusercontent.com/albionlabs/albion.registry/02d7b91bc0f8cc03916ce3479d96779965c95a10/src/dynamic-spread.rain
-canary https://raw.githubusercontent.com/albionlabs/albion.registry/02d7b91bc0f8cc03916ce3479d96779965c95a10/src/canary.rain
+https://raw.githubusercontent.com/albionlabs/albion.registry/405763453557ae07b530a45b33a315df5b972870/settings.yaml
+fixed-limit https://raw.githubusercontent.com/albionlabs/albion.registry/405763453557ae07b530a45b33a315df5b972870/src/fixed-limit.rain
+auction-dca https://raw.githubusercontent.com/albionlabs/albion.registry/405763453557ae07b530a45b33a315df5b972870/src/auction-dca.rain
+grid https://raw.githubusercontent.com/albionlabs/albion.registry/405763453557ae07b530a45b33a315df5b972870/src/grid.rain
+dynamic-spread https://raw.githubusercontent.com/albionlabs/albion.registry/405763453557ae07b530a45b33a315df5b972870/src/dynamic-spread.rain
+canary https://raw.githubusercontent.com/albionlabs/albion.registry/405763453557ae07b530a45b33a315df5b972870/src/canary.rain
