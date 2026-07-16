@@ -1,21 +1,41 @@
-version: 2
+version: 6
 networks:
   base:
     rpcs:
+      - https://mainnet.base.org
+      - https://base.drpc.org
       - https://base-rpc.publicnode.com
+      - https://developer-access-mainnet.base.org
     chain-id: 8453
     network-id: 8453
     currency: ETH
 subgraphs:
-  base: https://api.goldsky.com/api/public/project_clv14x04y9kzi01saerx7bxpg/subgraphs/ob4-base/2024-12-13-9c39/gn
+  base: https://api.goldsky.com/api/public/project_clv14x04y9kzi01saerx7bxpg/subgraphs/ob4-base/2026-02-05-c4ef/gn
+  sft-base: https://api.goldsky.com/api/public/project_cm153vmqi5gke01vy66p4ftzf/subgraphs/sft-offchainassetvaulttest-base/1.0.5/gn
 metaboards:
   base: https://api.goldsky.com/api/public/project_clv14x04y9kzi01saerx7bxpg/subgraphs/metadata-base/2025-07-06-594f/gn
-orderbooks:
+raindexes:
   base:
-    address: 0xd2938e7c9fe3597f78832ce780feb61945c377d7
+    address: 0xe522cB4a5fCb2eb31a52Ff41a4653d85A4fd7C9D
     network: base
     subgraph: base
-deployers:
+    deployment-block: 41747644
+    local-db-remote: raindex
+rainlangs:
   base:
-    address: 0xC1A14cE2fd58A3A2f99deCb8eDd866204eE07f8D
+    address: 0xd905B56949284Bb1d28eeFC05be78Af69cCf3668
     network: base
+local-db-remotes:
+  raindex: https://raindex-bootstrap-db.lon1.digitaloceanspaces.com/local-db-manifests/1779881382550/manifest.yaml
+local-db-sync:
+  base:
+    batch-size: 50
+    max-concurrent-batches: 1
+    retry-attempts: 3
+    retry-delay-ms: 1000
+    rate-limit-delay-ms: 5000
+    finality-depth: 4
+    bootstrap-block-threshold: 300
+    sync-interval-ms: 5000
+using-tokens-from:
+  - https://raw.githubusercontent.com/albionlabs/albion.registry/a899e4ad1fc670980f4a064048f3f945fa7626d4/token-lists/base.json
