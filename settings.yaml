@@ -38,4 +38,4 @@ local-db-sync:
     bootstrap-block-threshold: 300
     sync-interval-ms: 5000
 using-tokens-from:
-  - https://raw.githubusercontent.com/albionlabs/albion.registry/f4d3a131f8d5e2fd036e434966189180d94f77d8/token-lists/base.json
+  - https://raw.githubusercontent.com/albionlabs/albion.registry/f4d3a131ad863a19d63217da48dd3f7f649f51be/token-lists/base.json
