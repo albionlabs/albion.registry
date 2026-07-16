@@ -1,0 +1,38 @@
+name: Generate public registry data URI
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    name: Generate public registry data URI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out registry
+        uses: actions/checkout@v6
+
+      - name: Build registry data URI
+        run: |
+          set -euo pipefail
+
+          scripts/build-public-registry-data-uri.sh \
+            --output "${RUNNER_TEMP}/registry-data-uri.txt"
+
+          {
+            echo "### Registry data URI"
+            echo
+            echo "Generated from \`${GITHUB_REPOSITORY}@${GITHUB_SHA}\` without private RPC injection."
+            echo
+            echo '```toml'
+            printf 'registry_url = "%s"\n' "$(cat "${RUNNER_TEMP}/registry-data-uri.txt")"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload registry data URI
+        uses: actions/upload-artifact@v6
+        with:
+          name: registry-data-uri
+          path: ${{ runner.temp }}/registry-data-uri.txt
