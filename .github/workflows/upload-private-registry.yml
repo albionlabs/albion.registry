@@ -1,0 +1,108 @@
+name: Upload private registry
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "API environment to update"
+        required: true
+        type: choice
+        default: "staging"
+        options:
+          - staging
+          - production
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    name: Upload private registry artifact
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate target branch
+        env:
+          TARGET: ${{ inputs.target }}
+        run: |
+          set -euo pipefail
+
+          if [ "${TARGET}" = "production" ] && [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "Production registry uploads must run from main, got ${GITHUB_REF}" >&2
+            exit 1
+          fi
+
+      - name: Check out registry
+        uses: actions/checkout@v6
+
+      - name: Build private registry artifact
+        env:
+          PRIVATE_BASE_RPC_URLS: ${{ secrets.PRIVATE_BASE_RPC_URLS }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${PRIVATE_BASE_RPC_URLS}" ]; then
+            echo "PRIVATE_BASE_RPC_URLS secret is required" >&2
+            exit 1
+          fi
+
+          scripts/build-private-registry-artifact.sh \
+            --private-base-rpc-urls "${PRIVATE_BASE_RPC_URLS}" \
+            --output "${RUNNER_TEMP}/private-registry-artifact.b64"
+
+          registry_artifact_b64="$(cat "${RUNNER_TEMP}/private-registry-artifact.b64")"
+          printf '{"registry_artifact":"data:text/plain;base64,%s","source_commit":"%s"}\n' \
+            "${registry_artifact_b64}" \
+            "${GITHUB_SHA}" \
+            > "${RUNNER_TEMP}/private-registry-upload.json"
+
+      - name: Upload private registry artifact
+        env:
+          TARGET: ${{ inputs.target }}
+          PRODUCTION_ALBION_REST_API_URL: ${{ secrets.ALBION_REST_API_URL }}
+          PRODUCTION_ALBION_REST_API_ADMIN_KEY_ID: ${{ secrets.ALBION_REST_API_ADMIN_KEY_ID }}
+          PRODUCTION_ALBION_REST_API_ADMIN_SECRET: ${{ secrets.ALBION_REST_API_ADMIN_SECRET }}
+          STAGING_ALBION_REST_API_URL: ${{ secrets.STAGING_ALBION_REST_API_URL }}
+          STAGING_ALBION_REST_API_ADMIN_KEY_ID: ${{ secrets.STAGING_ALBION_REST_API_ADMIN_KEY_ID }}
+          STAGING_ALBION_REST_API_ADMIN_SECRET: ${{ secrets.STAGING_ALBION_REST_API_ADMIN_SECRET }}
+        run: |
+          set -euo pipefail
+
+          case "${TARGET}" in
+            production)
+              api_url="${PRODUCTION_ALBION_REST_API_URL}"
+              admin_key_id="${PRODUCTION_ALBION_REST_API_ADMIN_KEY_ID}"
+              admin_secret="${PRODUCTION_ALBION_REST_API_ADMIN_SECRET}"
+              ;;
+            staging)
+              api_url="${STAGING_ALBION_REST_API_URL}"
+              admin_key_id="${STAGING_ALBION_REST_API_ADMIN_KEY_ID}"
+              admin_secret="${STAGING_ALBION_REST_API_ADMIN_SECRET}"
+              ;;
+            *)
+              echo "Unsupported target: ${TARGET}" >&2
+              exit 1
+              ;;
+          esac
+
+          if [ -z "${api_url}" ]; then
+            echo "${TARGET} API URL secret is required" >&2
+            exit 1
+          fi
+          if [ -z "${admin_key_id}" ]; then
+            echo "${TARGET} API admin key ID secret is required" >&2
+            exit 1
+          fi
+          if [ -z "${admin_secret}" ]; then
+            echo "${TARGET} API admin secret is required" >&2
+            exit 1
+          fi
+
+          api_url="${api_url%/}"
+          curl --silent --show-error --fail \
+            --request PUT "${api_url}/admin/registry" \
+            --user "${admin_key_id}:${admin_secret}" \
+            --header "Content-Type: application/json" \
+            --data-binary "@${RUNNER_TEMP}/private-registry-upload.json" \
+            --output /dev/null
+
+          echo "Uploaded private registry artifact for ${GITHUB_SHA} to ${TARGET}"

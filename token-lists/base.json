@@ -1,30 +1,68 @@
 {
-    "name": "Base Tokens",
-    "description": "Essential tokens on the Base Network including native wrapped assets, bridged stablecoins, and staking derivatives",
+    "name": "Albion Base Token List",
+    "description": "Albion Labs tokenized royalty assets on Base, plus the USDC settlement token",
+    "timestamp": "2026-07-16T00:00:00.000Z",
     "version": {
-      "major": 1,
-      "minor": 0,
-      "patch": 0
+        "major": 2,
+        "minor": 0,
+        "patch": 0
     },
-    "timestamp": "2025-07-11T06:49:31Z",
-    "logoURI": "",
-    "keywords": ["tokens", "defi", "base"],
+    "keywords": ["albion", "royalty", "energy", "tokenized", "rwa", "base"],
+    "tags": {
+        "albion": {
+            "name": "Albion",
+            "description": "Albion Labs tokenized royalty assets"
+        }
+    },
+    "logoURI": "https://raw.githubusercontent.com/albionlabs/tokenlist/main/assets/albion-logo.svg",
     "tokens": [
-      {
-        "name": "Albion Wressle-1 4.5% Royalty",
-        "symbol": "ALB-WR1-R1",
-        "address": "0xf836a500910453A397084ADe41321ee20a5AAde1",
-        "decimals": 18,
-        "chainId": 8453,
-        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png"
-      },
-      {
-        "name": "Albion Wressle-1 4.5% Royalty Investor Preview",
-        "symbol": "ALB-WR1-R2",
-        "address": "0x1d57246fd0ba134d7cc78ddf3ed829379d95f4b7",
-        "decimals": 18,
-        "chainId": 8453,
-        "logoURI": "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xdAC17F958D2ee523a2206206994597C13D831ec7/logo.png"
-      }
+        {
+            "chainId": 8453,
+            "address": "0xf836a500910453A397084ADe41321ee20a5AAde1",
+            "decimals": 18,
+            "name": "Wressle-1 Royalty Community Preview",
+            "symbol": "ALB-WR1-R1",
+            "logoURI": "https://raw.githubusercontent.com/albionlabs/tokenlist/main/assets/r1-token-logo.svg",
+            "tags": ["albion"],
+            "extensions": {
+                "underlying": "Wressle Oil Field",
+                "royaltyShare": "2.5% of 4.5% gross royalty",
+                "operator": "Europa Oil & Gas",
+                "location": "Lincolnshire, UK",
+                "product": "Light Brent-linked crude",
+                "issuer": "S01 Issuer",
+                "maxSupply": "20000",
+                "basescan": "https://basescan.org/token/0xf836a500910453A397084ADe41321ee20a5AAde1",
+                "exchange": "https://albion.exchange"
+            }
+        },
+        {
+            "chainId": 8453,
+            "address": "0x1d57246fd0ba134d7cc78ddf3ed829379d95f4b7",
+            "decimals": 18,
+            "name": "Wressle-1 Royalty Investor Preview",
+            "symbol": "ALB-WR1-R2",
+            "logoURI": "https://raw.githubusercontent.com/albionlabs/tokenlist/main/assets/r2-token-logo.svg",
+            "tags": ["albion"],
+            "extensions": {
+                "underlying": "Wressle Oil Field",
+                "royaltyShare": "7.5% of 4.5% gross royalty",
+                "operator": "Europa Oil & Gas",
+                "location": "Lincolnshire, UK",
+                "product": "Light Brent-linked crude",
+                "issuer": "S01 Issuer",
+                "maxSupply": "36000",
+                "basescan": "https://basescan.org/token/0x1d57246fd0ba134d7cc78ddf3ed829379d95f4b7",
+                "exchange": "https://albion.exchange"
+            }
+        },
+        {
+            "chainId": 8453,
+            "address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "decimals": 6,
+            "name": "USD Coin",
+            "symbol": "USDC",
+            "logoURI": "https://static.optimism.io/data/USDC/logo.png"
+        }
     ]
-  }
+}
