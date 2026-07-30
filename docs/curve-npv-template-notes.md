@@ -106,6 +106,7 @@ dispatches.
 | `greater-than(fair-value 0)` | `#curve-npv-floor` | **New.** Once every bucket has drained or been clamped past, a sell order would otherwise quote `hard-floor` (default 0) for the whole vault. Halting is correct, and it gives a readable revert instead of the `inv` divide-by-zero the buy orientation would hit. |
 | `greater-than-or-equal-to(now() start-time)`, `less-than(now() add(start-time bp-horizon))` | `#calculate-io` | §7 guardrail 1, unchanged. Also bounds how many New Year rollovers an order can survive before its whole grid is behind `base_year`. |
 | add-order binding consistency | `#handle-add-order` | §7 add-order list. Kept from v1; **added** `equal-to(benchmark-schema-version 2)`, `equal-to(asset-schema-version 3)`, `less-than-or-equal-to(benchmark-slot 3)`, `equal-to(asset-slot 4)`, `equal-to(benchmark-slot sub(benchmark-id 1))`, `is-zero(is-zero(meta-hash))`, and the product-2 slot/id pairing. |
+| `any(is-zero(total2-a0) product-2-enabled)` | `#handle-add-order` | **New (H2).** `product-2-fn` is a *source* binding — invisible to every numeric guard — so a non-zero db2 grid deployed against `'product-2-off` passed everything and then quoted product-1-only fair value with no revert. That is a mispricing, not a halt. `product-2-enabled` is a numeric mirror of the fn binding (scenario-only, never a GUI field) so add-order can see the mismatch. |
 
 ### Deliberately removed
 
@@ -201,16 +202,36 @@ fallback value. The authoring meta says the same
 conditions are nonzero, the expression reverts. Provide a constant nonzero
 value to define a fallback case."*
 
-The v1 `#bucket-interp` ended in a bare `v4` (11 inputs, odd), so `seg-index 4`
-— reached for **every** `t-frac` in `[0.8, 1]` — reverted with the message `"v4"`
-instead of returning the last segment. Same latent defect exists in the shipped
-`oil-token-projection-npv-dca.rain` `#bbl-remaining-per-token` (23 inputs,
-trailing `v11`, reached at `t-frac = 1`).
+The v1 `#bucket-interp` ended in a bare `v4` — **9 inputs** (4 cond/value pairs
+plus the trailing item), odd — so `seg-index 4`, reached for **every** `t-frac`
+in `[0.8, 1]`, reverted with the message `"v4"` instead of returning the last
+segment.
 
 Both `conditions` in these templates now use an explicit `1 <default>` **pair**,
-keeping the input count even. Also note `LibOpConditions.integrity` and `run`
-mask the input count with `0x0F`, i.e. **15 inputs max** — both uses here are
-10 and 12.
+keeping the input count even (10 and 12). `#bucket-interp` additionally gained a
+`less-than(seg-index 5) v4` pair so its default returns `bp-f` — see L3 below.
+
+**Input cap.** `LibOpConditions.integrity` and `run` mask the input count with
+`0x0F`, and the parser refuses to encode more than 15 either way:
+`rain.interpreter/src/lib/parse/LibParseState.sol:408` reverts
+`OpcodeIOOverflow` when `opInputs > 0x0F`. Both uses here are within it.
+
+**Correction to an earlier claim in this document.** The shipped
+`oil-token-projection-npv-dca.rain` `#bbl-remaining-per-token` uses a 23-input
+`conditions`. That is **above the parser's 15-input ceiling**, so it is not a
+runtime revert at `t-frac = 1` as previously written here — as written, that
+source **cannot parse at all**. Either the file was never deployed in this form,
+or the deployed Base parser differs from the interpreter source read here.
+Flagged as open question 10; it needs an on-chain check, not a code change in
+these templates.
+
+**L3 — `#bucket-interp`'s default endpoint.** With a plain `1 v4` default,
+`seg-index == 5` (i.e. `t-frac == 1`, `within == 0`) evaluates `v4` to
+`bp-e + (bp-f - bp-e)*0 = bp-e`, the *second-to-last* anchor. That is wrong, and
+it was unreachable only because `#calculate-io` enforces
+`now < start-time + bp-horizon` **strictly**. The dispatch now carries an
+explicit `less-than(seg-index 5) v4` pair and defaults to `bp-f`, so the shared
+function is correct independent of its caller's guard.
 
 ## 5. Every Rainlang word used, with a citation
 
@@ -313,10 +334,13 @@ Both templates compose cleanly, in both product-2 modes:
 
 | Template | product-2 mode | `calculate-io` doc | `handle-add-order` doc |
 |---|---|---|---|
-| limit | `'product-2-off` | OK, 10832 chars, 9 sources | OK, 2581 chars |
-| limit | `'product-2-live` | OK, 11879 chars, 9 sources | OK, 2581 chars |
-| dca | `'product-2-off` | OK, 12840 chars, 16 sources | OK, 2728 chars |
-| dca | `'product-2-live` | OK, 13898 chars, 16 sources | OK, 2728 chars |
+| limit | `'product-2-off` | OK, 11155 chars, 9 sources | OK, 2952 chars |
+| limit | `'product-2-live` | OK, 12202 chars, 9 sources | OK, 2952 chars |
+| dca | `'product-2-off` | OK, 13163 chars, 16 sources | OK, 3099 chars |
+| dca | `'product-2-live` | OK, 14221 chars, 16 sources | OK, 3099 chars |
+
+(Re-run after the review fixes in `44d37af`; the earlier run of the same suite
+on `adab302` also passed, at slightly smaller sizes.)
 
 Confirmed by inspecting composed output: `signed-context<benchmark-slot 4>()`
 emits `signed-context<0 4>()`, `signer<asset-slot>()` emits `signer<4>()` — so
@@ -324,8 +348,13 @@ emits `signed-context<0 4>()`, `signer<asset-slot>()` emits `signer<4>()` — so
 slot-pinning design depends on. This was verified first in isolation with a
 5-line probe dotrain before being relied on.
 
-Compose ran against a throwaway `validate` scenario supplying all 100 (limit) /
-109 (dca) elided bindings, plus the repo's own `settings.yaml`. Only the
+Compose also confirms that `benchmark-id` / `benchmark-2-id` moving from GUI
+fields to scenario bindings (M3) leaves only `start-time` and `bp-horizon`
+elided on the real `sell` / `buy` deployments — i.e. exactly the two the GUI is
+meant to supply.
+
+Compose ran against a throwaway `validate` scenario supplying all 101 (limit) /
+110 (dca) elided bindings, plus the repo's own `settings.yaml`. Only the
 `version:` field had to change (6 → 5) because alpha.229 rejects spec version 6;
 the frontmatter vocabulary (`raindex:`, `rainlang:`, `oracle-url:`) is accepted
 as written. The probe harness lives in the session scratchpad and is not
@@ -347,6 +376,19 @@ Blocked by: no `rain` CLI in this repo's toolchain, no local anvil/Base fork set
 up in this session, and `@rainlanguage/orderbook` exposing no parse-only entry
 point that does not need an RPC.
 
+### Independently verified by adversarial review
+
+A separate review of this branch checked and found **clean**: all frame row
+indices against `oracle.rs`; both `conditions` input counts (10 and 12, even,
+≤ 15); `equal-to` on the address rows (sound — zero exponent field short-circuits
+the normalisation concern); a simulated 1 January base_year remap through
+`#price-for-year`; guard ordering within `#frame-guards`; the additivity of the
+`handle-add-order` additions; and `now()` type discipline across the freshness
+comparisons. It also confirmed `binary-equal-to` exists in this interpreter
+source (`LibAllStandardOps.sol:222`). The findings it raised are fixed in
+`44d37af` (C1, H2, H3, M2, M3, L1, L3) or recorded in §8.2 and §9 (M1, M4, M5,
+H4, L2).
+
 **Also not done:** no numeric quote was computed against a real frame. The live
 strip values were fetched (see §1) and hand-checked against the DecimalFloat
 encoding, but no end-to-end "given this grid and this strip, io = X" assertion
@@ -359,15 +401,97 @@ Everything below must be replaced or confirmed before a real deploy.
 
 | Value | Current state | What it needs |
 |---|---|---|
-| `oracle-url` | **STAGING** `https://albion-oracle-mrflki6foq-ey.a.run.app/context/v1` | Production is `https://albion-oracle-nu5w4hcuuq-ey.a.run.app/context/v1` (spec §16.6). |
-| `oracle-signer` | **STAGING** `0xCEd8AAb28809FbeAa9DE9E576A6255663C58DC78` (confirmed live via `/status`) | Production signer is `0x818D8Db28E07eaE7c75026D53cA4CCBeB5ee7b3D`. **Must flip in the same change as the URL** — either alone halts every order. A KMS `cryptoKeyVersion` bump has the same effect and is a strategy migration, not an ops action. |
+| `oracle-url` | **v1 placeholder, injected at deploy** — see §8.1. Do not edit. | nothing in this file; configure `PUBLIC_CURVE_ORACLE_URL`. |
+| `oracle-signer` | **zero-address placeholder, injected at deploy** — see §8.1. Do not edit. | nothing in this file; configure `PUBLIC_CURVE_ORACLE_SIGNER`. |
 | `meta-hash` | no default; add-order rejects zero | **No real Goldsky `metaV1S.metaHash` exists anywhere in the local repos** — every occurrence is a placeholder (`'0xhash'`, `"0x1234"`, `"0x"`). A genuine production CBOR payload does exist (`Albion-issuance-site/src/e2e/http-mock.ts:12`) but its hash is not recorded. Read it from Goldsky at deploy. |
 | `db-y*-bp*` grid (36 cells) | no defaults | Produced by `computeBucketNpvGrid()` in `albion.dex/src/lib/services/deploymentArgs.ts` (not yet written for this frame version). Inputs below. |
 | `raindex-subparser` | `0x22839F16281E67E5Fd395fAFd1571e820CbD46cB` | Copied from `src/fixed-limit.rain` scenario `base` in this repo. Confirm it is current. |
-| `benchmark-slot` / `benchmark-id` | `0` / `1` (Brent) | Correct for Wressle-1. A gas asset needs a sibling scenario pinning slot 2 (NBP) or 3 (TTF); nothing else changes. |
+| `benchmark-slot` / `benchmark-id` | `0` / `1` (Brent), both scenario bindings | Correct for Wressle-1. A gas asset needs a sibling scenario binding **slot and id together** (2/3 for NBP, 3/4 for TTF) — `handle-add-order` enforces `slot == id - 1`. Neither is a GUI field any more (M3). |
 | `start-time` / `bp-horizon` | no defaults | §13 open question 2: 24 months proposed. Note this also bounds how many New Year rollovers an order survives (see open question 3). |
-| `price-min` / `price-max` | 10 / 500 (carried from v1) | Brent-appropriate. A gas scenario needs a different band — NBP is currently ~$19.4/MMBtu falling to ~$8.9, so a floor of 10 would already halt the 2028+ buckets. |
+| `price-min` / `price-max` | 10 / 500 (carried from v1) | Brent-appropriate. **These defaults brick any NBP/TTF scenario** — NBP is currently ~$19.4/MMBtu falling to ~$8.9 by 2030, so a floor of 10 halts the 2028+ buckets on day one. See M4 in §8.2: the band is a whole-order kill switch, and its defaults must be set per benchmark by the deploy-side builder, not carried. |
+| `oracle-price-timeout` | default now **345600** (= the server validity window) | Confirm 96h is the intended availability/optionality trade-off; see H3/H4 in §8.2. |
 | `price-multiplier` | 0.80 | Spec default. |
+
+### 8.1 The oracle injection contract — do not hard-code
+
+`oracle-url` and `oracle-signer` are **placeholders that the consumer rewrites
+at deploy**. `albion.dex/src/lib/clients/rainStrategies.ts` holds them as exact
+string constants and rewrites them with `replaceAll`:
+
+```ts
+const ORACLE_URL_PLACEHOLDER = 'oracle-url: https://oracle.albionlabs.org/context/v1';
+const ORACLE_SIGNER_PLACEHOLDER = 'oracle-signer: 0x0000000000000000000000000000000000000000';
+...
+return text
+    .replaceAll(ORACLE_URL_PLACEHOLDER, `oracle-url: ${baseUrl}/context/v1`)
+    .replaceAll(ORACLE_SIGNER_PLACEHOLDER, `oracle-signer: ${signer}`);
+```
+
+The zero-address signer is **fail-safe by construction**: it matches no real
+signer, and the UI additionally gates the deploy on
+`isCurveOracleConfigured()`, so an un-injected template cannot reach the chain.
+
+An earlier revision of this branch pasted the live staging URL and signer into
+the frontmatter. That is a **fail-open** change: `replaceAll` silently finds
+nothing, and every environment — production included — deploys orders bound to
+staging. Both placeholders are now restored byte-for-byte, and the surrounding
+comment is worded so it does not itself contain either constant (otherwise
+`replaceAll` would also rewrite the documentation).
+
+Environment values, for reference only — **never paste these into a template**
+(spec §16.6, `/status` verified 2026-07-30):
+
+| Env | URL | Signer |
+|---|---|---|
+| staging | `https://albion-oracle-mrflki6foq-ey.a.run.app` | `0xCEd8AAb28809FbeAa9DE9E576A6255663C58DC78` |
+| production | `https://albion-oracle-nu5w4hcuuq-ey.a.run.app` | `0x818D8Db28E07eaE7c75026D53cA4CCBeB5ee7b3D` |
+
+URL and signer are one unit: either alone halts every order. A KMS
+`cryptoKeyVersion` bump changes the signer address, so signer rotation is a
+strategy migration (halt + redeploy every live order), not an ops action.
+
+**Follow-up owed on the dex side (out of scope for this repo):** the injector
+should **fail loudly when a placeholder is not found**, rather than returning
+the text unchanged. Today the only thing standing between a mis-edited template
+and a wrong-oracle deploy is code review. A post-replacement assertion — that
+each placeholder was found at least once, and that no `oracle-url` /
+`oracle-signer` line still holds a non-injected value — turns C1's failure class
+from silent to loud.
+
+### 8.2 Review findings recorded here rather than fixed in the templates
+
+**M1 — the 1 January weight cliff may be a material step, not a rounding
+error.** §3 argues the past-year clamp discards "a bucket already drained to
+near-zero". That is an assumption about the *shape* of the grid, not a
+guarantee. With the spec's default K=6 anchors over a 24-month horizon the
+anchor spacing is ~4.8 months, and the year-0 column's value at 31 December is
+whatever `computeBucketNpvGrid` put there — for a front-loaded profile it can
+still be a meaningful fraction of total NPV. The clamp then removes it in a
+single block. Before shipping, `computeBucketNpvGrid` must be **quantified
+against this**: compute the year-0 column's residual at the last instant of the
+deploy year for each real asset and state the resulting price step. If it is not
+negligible, the deploy-side builder should **pre-drain the year-0 column** so
+the grid itself reaches zero at the year boundary and the clamp becomes a no-op.
+
+**M4 — the price band is a whole-order kill switch.** `#bucket-contribution`
+halts the *entire* order when any **weighted** bucket's strip price falls outside
+`(price-min, price-max)`. A single live far-year bucket with a 0 or out-of-band
+price therefore stops all trading, not just that bucket's contribution. That is
+halt-not-misprice and it is intentional (§5, D11) — but it makes the band
+defaults load-bearing, and the carried-over `price-min: 10` is a Brent number
+that would brick any NBP or TTF scenario immediately (2030 NBP ≈ $8.9/MMBtu).
+Band defaults must be **set per benchmark at deploy**, alongside the
+slot/id pair.
+
+**M5 — nothing ties `year-0` to wall-clock time.** `handle-add-order` checks
+that `year-0..year-4` are consecutive, but not that `year-0` is the current or
+an upcoming calendar year: there is no year word, and `now()` is a unix
+timestamp, not a year. A grid baked with a wrong `year-0` therefore **deploys
+cleanly and halts on the first quote** (no slot matches, every weight clamps,
+the new `fair-value > 0` guard fires). Fail-safe, but a silent one: the user
+learns after the add-order transaction. Validating `year-0` against the
+deployment date is a **deploy-side builder responsibility** and should be an
+explicit check there.
 
 ### Real Wressle-1 data found (for the grid builder, not baked here)
 
@@ -403,11 +527,16 @@ in-comment as an estimate).
 
 ## 9. Open questions for review
 
-1. **`binary-equal-to` for the metaHash row.** Available in the interpreter
-   source; unknown whether the deployed Base parser
-   (`0xd905B56949284Bb1d28eeFC05be78Af69cCf3668`) carries it. If it does, guard
-   11 should use it and §6's caveat disappears. Cheap to check with one parse
-   call against Base.
+1. **`binary-equal-to` for the metaHash row — do it.** Review confirmed the word
+   **exists** in this interpreter source (`LibAllStandardOps.sol:222`, raw `eq`),
+   so the only open part is whether the deployed Base parser
+   (`0xd905B56949284Bb1d28eeFC05be78Af69cCf3668`) carries it. `equal-to`'s
+   float-normalisation caveat on an arbitrary bytes32 (§6) is a real defect, not
+   a theoretical one — it is currently fail-safe (a missed halt bounded by the
+   price bands, never a wrong price), which is why it is not being changed blind.
+   **Switch guard 11 to `binary-equal-to` in the same pass that does the on-chain
+   parse verification**, so word availability and the switch are confirmed
+   together in one round trip.
 2. **Where do these files live?** They are on `feat/curve-npv-strategy` in
    `albion.registry` because that is where this task was scoped, but the
    originals are `albion.dex/src/lib/strategies/`. If they stay in the registry,
@@ -425,17 +554,16 @@ in-comment as an estimate).
    `db-y0-bp*` is the discounted production of those same months. That pairing
    is right at breakpoint 0 and drifts within a segment. Was that intended, and
    does `computeBucketNpvGrid` build the year-0 column on remaining months only?
-5. **Buy-side token labelling.** The imported `buy` GUI block labels
-   `output` as "Token to Sell / reserve token" and `input` as "Token to Buy /
-   payment token" — identical to the `sell` block, which looks like a
-   copy-paste. The `buy` scenario now binds
-   `asset-id: ${order.inputs.0.token.address}` on the assumption the buyer
-   *receives* the royalty token. If the labels are right and the binding is
-   wrong, the order permanently halts on guard 9 (fail-safe, not a mispricing),
-   but it should be settled.
-6. **Product-2 `benchmark-2-slot` when disabled.** It is bound to `1` and never
-   read in the `'product-2-off` scenarios. Harmless, but a reviewer may prefer
-   an obviously-inert value or a separate elided-binding set.
+5. ~~**Buy-side token labelling.**~~ **RESOLVED (M2).** The imported `buy` GUI
+   block had `sell`'s labels. The binding was right — for a buy order the *input*
+   is the royalty token — so the labels were corrected, and both orientations now
+   state explicitly which side must be the Albion asset token.
+6. **Product-2 `benchmark-2-slot` / `benchmark-2-id` when disabled.** Bound to
+   `1` / `2` and never read in the `'product-2-off` scenarios. They are kept
+   internally consistent (slot 1 == WTI == id 2) so flipping `product-2-fn`
+   needs no other edit, and `product-2-enabled` (H2) now stops a stray db2 grid
+   from being silently ignored. A reviewer may still prefer an obviously-inert
+   value or a separate elided-binding set.
 7. **`max-output: max-positive-value()` in the limit template.** Carried over
    unchanged, but combined with the new `fair-value > 0` halt it means the order
    offers the entire vault at the computed floor with no per-trade cap. Worth
@@ -444,8 +572,20 @@ in-comment as an estimate).
    `0x0F`. Both uses here are within it (10 and 12), but any future extension of
    the year dispatch past 7 pairs would silently misbehave. Worth a comment in
    the deploy-side builder.
-9. **The `conditions` odd-input defect** (§4) also exists in the *shipped*
-   `oil-token-projection-npv-dca.rain`, which is live. Separate ticket?
+9. **`oracle-price-timeout` = 96h is now the default** (H3), which makes the
+   frame's own `expires-at` row the effective freshness guard and removes the
+   predictable weekend halt. The cost is taker optionality (H4): within the
+   window a taker may replay whichever signed frame prices most favourably, so
+   96h is 96h of free look-back on a moving strip. Shortening it trades
+   availability for tighter pricing and reintroduces settlement-gap halts. Is
+   96h the right point on that curve, or should the server's
+   `validity_window_secs` come down instead?
+10. **The shipped `oil-token-projection-npv-dca.rain` cannot parse as written**
+   (§4): its `#bbl-remaining-per-token` `conditions` takes 23 inputs, above the
+   parser's 15-input ceiling (`LibParseState.sol:408`, `OpcodeIOOverflow`). Since
+   that strategy is believed live, either it was never deployed in this form or
+   the deployed Base parser differs from the interpreter source read here.
+   **Needs an on-chain check** — pair it with open question 1's parse call.
 
 ## 10. Provenance of every external source used
 
