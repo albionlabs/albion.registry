@@ -881,6 +881,19 @@ gui:
    NOTE: no using-words-from here -- the on-chain parser accepts the
    pragma only at the top of a composed document, so it lives in the
    entrypoints and covers every called function. */
+/* SOURCE BUDGET -- the deployed Base parser hard-caps a composed
+   document at 15 SOURCES. Empirically verified on a fork of the deployed
+   parser 0xd905B5...3668: 15 sources parse, 16 revert `MaxSources`
+   (0xa8062841). The composed `#calculate-io` document is what counts --
+   it pulls in `#handle-io` plus every source reachable through `call<>`,
+   including whichever function bindings the scenario selects.
+   `#handle-add-order` composes as its own document and is counted
+   separately.
+
+   Practical rule when editing these templates: a helper with a SINGLE
+   call site must be INLINED, not factored into its own source. Factoring
+   for readability costs a source and there is very little headroom. Count
+   before adding one. */
 #frame-guards
 /* --- benchmark slot ---
    Signature verification is per signed context: slot 0's authenticity
@@ -1216,16 +1229,23 @@ last-io:,
 #set-initial-time
 :set(hash(order-hash() initial-time-key) now());
 
-#get-initial-time
-_:get(hash(order-hash() initial-time-key));
+/* #get-initial-time and #get-last-trade used to be separate sources here.
+   They are inlined at their call sites because the composed
+   `#calculate-io` document was 16 sources and the deployed parser caps at
+   15 -- see the SOURCE BUDGET note above. Removing both leaves 14, i.e.
+   one source of headroom rather than zero.
 
-#get-last-trade
-last-time:get(hash(order-hash() last-trade-time-key)),
-last-io:get(hash(order-hash() last-trade-io-key));
-
+   The inlining is behaviour-preserving. `call` copies outputs from the
+   TOP of the callee's stack downward
+   (rain.interpreter/src/lib/op/call/LibOpCall.sol, "Copy outputs out"),
+   and LHS names bind in callee push order, so
+   `last-time _: call<'get-last-trade>()` bound (last-time, last-io) and
+   the single-output `last-io: call<'get-last-trade>()` in #io-for-epoch
+   bound last-io. Each site now reads exactly the key it was already
+   getting; #get-epoch never used the last-io output at all. */
 #get-epoch
-initial-time: call<'get-initial-time>(),
-last-time _: call<'get-last-trade>(),
+initial-time: get(hash(order-hash() initial-time-key)),
+last-time: get(hash(order-hash() last-trade-time-key)),
 duration: sub(now() any(last-time initial-time)),
 total-duration: sub(now() initial-time),
 ratio-freeze-amount-epochs: div(min-trade-amount amount-per-epoch),
@@ -1251,7 +1271,8 @@ val: power(0.5 epoch);
 
 #io-for-epoch
 epoch:,
-last-io: call<'get-last-trade>(),
+/* Inlined from the former #get-last-trade -- see #get-epoch above. */
+last-io: get(hash(order-hash() last-trade-io-key)),
 max-next-trade: any(mul(last-io next-trade-multiplier) call<'initial-io-fn>()),
 baseline-next-trade: mul(last-io next-trade-baseline-multiplier),
 real-baseline: max(baseline-next-trade call<'baseline-fn>()),

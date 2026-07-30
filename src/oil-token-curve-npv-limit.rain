@@ -767,6 +767,19 @@ gui:
    NOTE: no using-words-from here -- the on-chain parser accepts the
    pragma only at the top of a composed document, so it lives in the
    entrypoints and covers every called function. */
+/* SOURCE BUDGET -- the deployed Base parser hard-caps a composed
+   document at 15 SOURCES. Empirically verified on a fork of the deployed
+   parser 0xd905B5...3668: 15 sources parse, 16 revert `MaxSources`
+   (0xa8062841). The composed `#calculate-io` document is what counts --
+   it pulls in `#handle-io` plus every source reachable through `call<>`,
+   including whichever function bindings the scenario selects.
+   `#handle-add-order` composes as its own document and is counted
+   separately.
+
+   Practical rule when editing these templates: a helper with a SINGLE
+   call site must be INLINED, not factored into its own source. Factoring
+   for readability costs a source and there is very little headroom. Count
+   before adding one. */
 #frame-guards
 /* --- benchmark slot ---
    Signature verification is per signed context: slot 0's authenticity
