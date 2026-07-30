@@ -922,24 +922,30 @@ bm-issued: signed-context<benchmark-slot 2>(),
    DecimalFloat 0 and raw zero bytes32 coincide, so the halt fires
    whichever way the row is interpreted.
 
-   CAVEAT on equal-to over raw bytes32 (spec s15 item 5, carried forward
-   verbatim by s16.4(b)): `equal-to` has DecimalFloat NUMERIC semantics,
-   not bitwise. Rows 1 and 2 are raw bytes32, so these are numeric
-   comparisons of bytes reinterpreted as DecimalFloat -- top 4 bytes
-   exponent, low 28 bytes coefficient. Acceptable because the frame is
-   signed by the trusted key: producing a numerically-equal but
-   bitwise-different metaHash requires our own server to sign it, and the
-   failure mode is a MISSED halt bounded by the price bands, never a
-   wrong price. The address rows are safe unconditionally -- a
-   left-padded 20-byte address has a zero exponent field, so numeric
-   equality there is exact. st0x ships the same equal-to-on-bytes32
-   pattern in production (st0x-oracle-limit-v4.rain rows 6/7).
-   TODO(review): `binary-equal-to` ("1 if all inputs are equal, 0
+   ROW 2 (metaHash) USES `binary-equal-to`, ROWS 1 AND THE BENCHMARK ROWS
+   USE `equal-to`. The distinction is deliberate.
+
+   `equal-to` has DecimalFloat NUMERIC semantics, not bitwise. Rows 1 and
+   2 are raw bytes32, so comparing them with `equal-to` reinterprets the
+   bytes as DecimalFloat -- top 4 bytes exponent, low 28 bytes
+   coefficient. For a metaHash that is arbitrary 32 bytes, so two distinct
+   hashes could in principle normalise equal; the caveat carried from spec
+   s15 item 5 / s16.4(b) argued this was tolerable because the frame is
+   signed by the trusted key and the failure mode is a MISSED halt bounded
+   by the price bands. `binary-equal-to` ("1 if all inputs are equal, 0
    otherwise. Equality is binary." --
-   rain.interpreter/src/lib/op/LibAllStandardOps.sol) would remove the
-   caveat on row 2 entirely. It is NOT used here because this template has
-   not been parsed against the deployed Base parser, so its availability
-   there is unverified. */
+   rain.interpreter/src/lib/op/LibAllStandardOps.sol) removes the caveat
+   outright, and it is CONFIRMED AVAILABLE on the deployed Base parser
+   (native opcode 0x1f; fork-verified to parse, to fill with the correct
+   hash, and to revert "meta-revised" with a stale one). So row 2 now uses
+   it and the normalisation caveat no longer applies to this order.
+
+   The address rows deliberately stay on `equal-to`: a left-padded
+   20-byte address has an all-zero exponent field, so numeric equality
+   short-circuits to exact -- verified sound -- and `equal-to` is what
+   interoperates with the `input-token()` / `output-token()` context
+   encodings. st0x ships that same pattern in production
+   (st0x-oracle-limit-v4.rain rows 6/7). */
 :ensure(
   equal-to(signer<asset-slot>() oracle-signer)
   "asset: untrusted signer"
@@ -962,7 +968,7 @@ bm-issued: signed-context<benchmark-slot 2>(),
   "asset: not in this pair"
 ),
 :ensure(
-  equal-to(signed-context<asset-slot 2>() meta-hash)
+  binary-equal-to(signed-context<asset-slot 2>() meta-hash)
   "meta-revised"
 ),
 asset-issued: signed-context<asset-slot 3>(),
