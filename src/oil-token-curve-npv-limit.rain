@@ -3,19 +3,27 @@ version: 5
 orders:
   base:
     raindex: base
-    # STAGING oracle -- live and verified 2026-07-30 (GET /status reports
-    # signer 0xced8...dc78 with all four strips warm). The taker fetches
-    # the signed 5-frame bundle from this URL per trade and attaches it to
-    # takeOrders4 / quote2; the orderbook verifies each frame separately.
+    # PLACEHOLDER -- DO NOT EDIT THE VALUE. Injected at deploy by the
+    # consumer: albion.dex src/lib/clients/rainStrategies.ts holds the
+    # `oracle-url:` and `oracle-signer:` lines below as exact string
+    # constants (ORACLE_URL_PLACEHOLDER / ORACLE_SIGNER_PLACEHOLDER) and
+    # rewrites them with `replaceAll`, substituting PUBLIC_CURVE_ORACLE_URL +
+    # PUBLIC_CURVE_ORACLE_SIGNER. Writing a real URL or signer here makes
+    # that replaceAll a silent no-op and pins EVERY environment --
+    # production included -- to whatever was hard-coded. The zero-address
+    # signer is the fail-safe: unconfigured envs leave the placeholders
+    # untouched and the UI blocks the deploy (isCurveOracleConfigured()).
     #
-    # TODO(prod): production is
-    #   https://albion-oracle-nu5w4hcuuq-ey.a.run.app/context/v1
-    # signing with 0x818D8Db28E07eaE7c75026D53cA4CCBeB5ee7b3D. This URL and
-    # the `oracle-signer` binding below MUST be flipped in the same change:
-    # either one alone halts every order. The same applies to a KMS
-    # cryptoKeyVersion bump, which changes the signer address -- signer
-    # rotation is a strategy migration, not an ops action (spec s16.6).
-    oracle-url: https://albion-oracle-mrflki6foq-ey.a.run.app/context/v1
+    # Environments, for reference only (spec s16.6, /status verified
+    # 2026-07-30). Never paste these into the template:
+    #   staging     https://albion-oracle-mrflki6foq-ey.a.run.app
+    #               signer 0xCEd8AAb28809FbeAa9DE9E576A6255663C58DC78
+    #   production  https://albion-oracle-nu5w4hcuuq-ey.a.run.app
+    #               signer 0x818D8Db28E07eaE7c75026D53cA4CCBeB5ee7b3D
+    # URL and signer are one unit: either alone halts every order. A KMS
+    # cryptoKeyVersion bump changes the signer address, so signer rotation
+    # is a strategy migration, not an ops action.
+    oracle-url: https://oracle.albionlabs.org/context/v1
     inputs:
       - token: input
     outputs:
@@ -42,9 +50,12 @@ scenarios:
     runs: 1
     bindings:
       raindex-subparser: 0x22839F16281E67E5Fd395fAFd1571e820CbD46cB
-      # STAGING signer. TODO(prod): flip together with `oracle-url` above.
-      # Integration tests patch this with a throwaway signing key.
-      oracle-signer: 0xCEd8AAb28809FbeAa9DE9E576A6255663C58DC78
+      # PLACEHOLDER -- DO NOT EDIT THE VALUE. Injected at deploy alongside
+      # `oracle-url` (see the comment in the order block). The zero address
+      # is deliberately fail-safe: it matches no real signer, so an
+      # un-injected template cannot produce a tradeable order. Integration
+      # tests patch this with a throwaway signing key.
+      oracle-signer: 0x0000000000000000000000000000000000000000
       benchmark-schema-version: 2
       asset-schema-version: 3
       # Slot pinning -- spec s16.4(c) option (i). The /context/v1 bundle
@@ -54,11 +65,22 @@ scenarios:
       # sibling scenario pinning 2 (NBP) or 3 (TTF); nothing else changes.
       benchmark-slot: 0
       asset-slot: 4
+      # Series ids are scenario bindings, not GUI fields: handle-add-order
+      # requires benchmark-slot == benchmark-id - 1, so with the slot pinned
+      # per scenario there is exactly one non-reverting id. Supporting
+      # WTI/NBP/TTF means a sibling scenario binding both slot and id
+      # together (1/2, 2/3, 3/4) -- the spec's slot-pinning decision
+      # (s16.4(c) option (i)) makes the pair a deploy-time constant.
+      benchmark-id: 1
       # Single-product asset: product 2 is disabled by never reading a
       # second benchmark slot (spec s16.4(c)), so it costs no signer /
-      # schema / freshness guard set. benchmark-2-slot is inert here.
+      # schema / freshness guard set. benchmark-2-slot / benchmark-2-id are
+      # inert here but kept internally consistent (slot 1 == WTI == id 2) so
+      # flipping product-2-fn to 'product-2-live needs no other edit.
       product-2-fn: '''product-2-off'
+      product-2-enabled: 0
       benchmark-2-slot: 1
+      benchmark-2-id: 2
       # The oracle derives the asset from the order's IO pair (whichever
       # side is not the quote token), so this must name the same side.
       asset-id: ${order.outputs.0.token.address}
@@ -70,7 +92,8 @@ scenarios:
     runs: 1
     bindings:
       raindex-subparser: 0x22839F16281E67E5Fd395fAFd1571e820CbD46cB
-      oracle-signer: 0xCEd8AAb28809FbeAa9DE9E576A6255663C58DC78
+      # PLACEHOLDER -- injected at deploy. See the first scenario.
+      oracle-signer: 0x0000000000000000000000000000000000000000
       benchmark-schema-version: 2
       asset-schema-version: 3
       # Slot pinning -- spec s16.4(c) option (i). The /context/v1 bundle
@@ -80,11 +103,22 @@ scenarios:
       # sibling scenario pinning 2 (NBP) or 3 (TTF); nothing else changes.
       benchmark-slot: 0
       asset-slot: 4
+      # Series ids are scenario bindings, not GUI fields: handle-add-order
+      # requires benchmark-slot == benchmark-id - 1, so with the slot pinned
+      # per scenario there is exactly one non-reverting id. Supporting
+      # WTI/NBP/TTF means a sibling scenario binding both slot and id
+      # together (1/2, 2/3, 3/4) -- the spec's slot-pinning decision
+      # (s16.4(c) option (i)) makes the pair a deploy-time constant.
+      benchmark-id: 1
       # Single-product asset: product 2 is disabled by never reading a
       # second benchmark slot (spec s16.4(c)), so it costs no signer /
-      # schema / freshness guard set. benchmark-2-slot is inert here.
+      # schema / freshness guard set. benchmark-2-slot / benchmark-2-id are
+      # inert here but kept internally consistent (slot 1 == WTI == id 2) so
+      # flipping product-2-fn to 'product-2-live needs no other edit.
       product-2-fn: '''product-2-off'
+      product-2-enabled: 0
       benchmark-2-slot: 1
+      benchmark-2-id: 2
       # The oracle derives the asset from the order's IO pair (whichever
       # side is not the quote token), so this must name the same side.
       asset-id: ${order.inputs.0.token.address}
@@ -118,12 +152,6 @@ gui:
       deposits:
         - token: output
       fields:
-        - binding: benchmark-id
-          name: Benchmark (1=Brent 2=WTI 3=NBP 4=TTF)
-          description: Product 1 price benchmark identifier.
-        - binding: benchmark-2-id
-          name: Benchmark 2 (0=disabled)
-          description: Product 2 price benchmark identifier; 0 for single-product assets.
         - binding: meta-hash
           name: Metadata hash
           description: Hash of the canonical asset metadata at deploy time.
@@ -296,16 +324,28 @@ gui:
           name: Net price adjustment ($/unit, product 2)
         - binding: oracle-price-timeout
           name: Oracle price timeout
-          description: Maximum frame age in seconds, measured from the frame's issued-at.
+          description: >
+            Maximum frame age in seconds, measured from the frame's own
+            issued-at row. For a benchmark frame that row is the SETTLEMENT
+            timestamp, not serve time, so the clock does not advance over
+            weekends or market holidays. The default matches the server's
+            validity window (96h), which makes the frame's own expires-at
+            row the effective guard and avoids a predictable weekly halt --
+            a Friday settlement is already >48h old by Sunday afternoon UTC.
+            Tighter values are opt-in and WILL halt the order across normal
+            settlement gaps. Note the flip side: this window is also taker
+            optionality -- within it a taker may replay whichever signed
+            frame prices most favourably, so shortening it trades
+            availability for tighter pricing.
           show-custom-field: true
-          default: 172800
+          default: 345600
           presets:
-            - name: 1 day (86400)
-              value: 86400
-            - name: 2 days (172800)
-              value: 172800
-            - name: 4 days (345600)
+            - name: 4 days (345600) -- matches the server validity window
               value: 345600
+            - name: 2 days (172800) -- halts over most weekends
+              value: 172800
+            - name: 1 day (86400) -- halts over any settlement gap
+              value: 86400
         - binding: price-min
           name: Price sanity floor ($/unit)
           show-custom-field: true
@@ -330,11 +370,14 @@ gui:
           default: 1000000000
       select-tokens:
         - key: output
-          name: Token to Sell
-          description: Select the reserve token you want to sell
+          name: Royalty token to sell
+          description: >
+            The Albion royalty token you are selling. THIS side must be the
+            Albion asset token -- asset-id binds to it and the oracle's asset
+            frame is minted for the non-quote side of the pair.
         - key: input
-          name: Token to Buy
-          description: Select the payment token you want to receive
+          name: Payment token to receive
+          description: The settlement token you receive (USDC).
 
     buy:
       name: Buy - Curve NPV limit
@@ -342,10 +385,6 @@ gui:
       deposits:
         - token: output
       fields:
-        - binding: benchmark-id
-          name: Benchmark (1=Brent 2=WTI 3=NBP 4=TTF)
-        - binding: benchmark-2-id
-          name: Benchmark 2 (0=disabled)
         - binding: meta-hash
           name: Metadata hash
         - binding: start-time
@@ -512,15 +551,28 @@ gui:
           name: Net price adjustment ($/unit, product 2)
         - binding: oracle-price-timeout
           name: Oracle price timeout
+          description: >
+            Maximum frame age in seconds, measured from the frame's own
+            issued-at row. For a benchmark frame that row is the SETTLEMENT
+            timestamp, not serve time, so the clock does not advance over
+            weekends or market holidays. The default matches the server's
+            validity window (96h), which makes the frame's own expires-at
+            row the effective guard and avoids a predictable weekly halt --
+            a Friday settlement is already >48h old by Sunday afternoon UTC.
+            Tighter values are opt-in and WILL halt the order across normal
+            settlement gaps. Note the flip side: this window is also taker
+            optionality -- within it a taker may replay whichever signed
+            frame prices most favourably, so shortening it trades
+            availability for tighter pricing.
           show-custom-field: true
-          default: 172800
+          default: 345600
           presets:
-            - name: 1 day (86400)
-              value: 86400
-            - name: 2 days (172800)
-              value: 172800
-            - name: 4 days (345600)
+            - name: 4 days (345600) -- matches the server validity window
               value: 345600
+            - name: 2 days (172800) -- halts over most weekends
+              value: 172800
+            - name: 1 day (86400) -- halts over any settlement gap
+              value: 86400
         - binding: price-min
           name: Price sanity floor ($/unit)
           show-custom-field: true
@@ -543,11 +595,14 @@ gui:
           default: 1000000000
       select-tokens:
         - key: output
-          name: Token to Sell
-          description: Select the reserve token you want to sell
+          name: Payment token to spend
+          description: The settlement token you are spending (USDC).
         - key: input
-          name: Token to Buy
-          description: Select the payment token you want to receive
+          name: Royalty token to buy
+          description: >
+            The Albion royalty token you are buying. THIS side must be the
+            Albion asset token -- asset-id binds to it and the oracle's asset
+            frame is minted for the non-quote side of the pair.
 
 ---
 #raindex-subparser !Raindex subparser.
@@ -560,6 +615,7 @@ gui:
 #asset-slot !Bundle slot of the asset metahash frame (4 in the /context/v1 bundle).
 #asset-id !This order's royalty token address; must equal asset frame row 1 and be one side of the live pair.
 #product-2-fn !Product 2 contribution: 'product-2-live reads a second benchmark slot, 'product-2-off returns 0.
+#product-2-enabled !1 when product-2-fn is 'product-2-live, 0 when 'product-2-off. Scenario binding, never a GUI field.
 
 #target-io-fn !Function computing the quoted io ratio (sell floor or buy inverse).
 
@@ -653,7 +709,7 @@ gui:
 #net-price-adjustment !Deducted from the strip price for product 1: transportCosts - benchmarkPremium ($/unit).
 #net-price-adjustment-2 !Deducted from the strip price for product 2 ($/unit).
 
-#oracle-price-timeout !Maximum frame age in seconds, measured from the frame's issued-at.
+#oracle-price-timeout !Max frame age in seconds vs each frame's own issued-at row (settlement clock for benchmark frames).
 #price-min !Sanity band floor; halt if any weighted bucket price <= this.
 #price-max !Sanity band ceiling; halt if any weighted bucket price >= this.
 
@@ -816,11 +872,16 @@ asset-issued: signed-context<asset-slot 3>(),
    makes the trailing item the REVERT REASON, not a default:
    rain.interpreter/src/lib/op/logic/LibOpConditions.sol --
    `if oddInputs { reason := mload(end) }`. The v1 form ended in a bare
-   `v4` (11 inputs), so seg-index 4 -- reached for every t-frac in
-   [0.8, 1] -- reverted with "v4" as the message instead of returning the
-   last segment. The default is now an explicit `1 v4` PAIR, keeping the
-   input count even. Same latent defect exists in the shipped
-   oil-token-projection-npv-dca.rain #bbl-remaining-per-token. */
+   `v4` (9 inputs: 4 cond/value pairs plus the trailing item), so
+   seg-index 4 -- reached for every t-frac in [0.8, 1] -- reverted with
+   "v4" as the message instead of returning the last segment.
+
+   The dispatch is now 6 pairs (12 inputs, even). seg-index 4 selects v4;
+   the default pair returns `bp-f`, the final anchor, which is the correct
+   value at t-frac == 1 where seg-index == 5 and `within` == 0 (v4 would
+   evaluate to bp-e there). That endpoint is presently unreachable only
+   because #calculate-io enforces `now < start-time + bp-horizon`
+   strictly; the function is now correct independent of its caller. */
 #bucket-interp
 bp-a bp-b bp-c bp-d bp-e bp-f seg-index within:,
 v0: add(bp-a mul(sub(bp-b bp-a) within)),
@@ -833,7 +894,8 @@ _: conditions(
      less-than(seg-index 2) v1
      less-than(seg-index 3) v2
      less-than(seg-index 4) v3
-     1 v4
+     less-than(seg-index 5) v4
+     1 bp-f
    );
 
 /* Select the strip row for one bucket's bound calendar year by OFFSET
@@ -1067,6 +1129,12 @@ total2-a0: add(add(add(db2-y0-bp0 db2-y1-bp0) add(db2-y2-bp0 db2-y3-bp0)) add(db
 total2-a5: add(add(add(db2-y0-bp5 db2-y1-bp5) add(db2-y2-bp5 db2-y3-bp5)) add(db2-y4-bp5 db2-y5-bp5)),
 :ensure(any(is-zero(total2-a0) greater-than(benchmark-2-id 0)) "benchmark2 required"),
 :ensure(any(is-zero(total2-a0) equal-to(benchmark-2-slot sub(benchmark-2-id 1))) "benchmark2 slot/id"),
+/* product-2-fn is a source binding, invisible to any numeric guard, so a
+   non-zero db2 grid deployed against 'product-2-off would quote
+   product-1-only fair value silently -- a mispricing with no revert.
+   product-2-enabled mirrors the fn binding numerically so add-order can
+   see the mismatch. */
+:ensure(any(is-zero(total2-a0) product-2-enabled) "p2 grid without p2 enabled"),
 :ensure(greater-than-or-equal-to(total2-a0 total2-a5) "endpoint2");
 /* No signed context exists at add time -- the metadata-revision guard
    lives in #frame-guards against the deploy-time meta-hash binding. */
