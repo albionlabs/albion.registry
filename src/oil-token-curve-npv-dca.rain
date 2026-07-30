@@ -1,0 +1,953 @@
+version: 5
+
+orders:
+  base:
+    orderbook: base
+    # TODO(albion.oracle-server): placeholder; runtime-injected by the client
+    # (like the RPC URL) once the production oracle server is live. The taker
+    # fetches an oracle-signed context frame from this URL per trade.
+    oracle-url: https://oracle.albionlabs.org/context/v1
+    inputs:
+      - token: input
+    outputs:
+      - token: output
+
+scenarios:
+  # Curve-NPV pricing: values baked production buckets against the live
+  # Bal/Cal forward strip carried in an oracle-signed context frame
+  # (SignedContextV1) attached by the taker and signature-verified by
+  # the orderbook -- no on-chain oracle contract.
+  # Grid (6 breakpoint anchors x 6 calendar-year buckets per product) is
+  # computed off-chain by computeBucketNpvGrid in
+  # src/lib/services/deploymentArgs.ts. Design spec:
+  # docs/superpowers/specs/2026-07-03-curve-npv-oracle-strategy-design.md (s15)
+  oil-curve-npv:
+    orderbook: base
+    rainlang: base
+    runs: 1
+    bindings:
+      raindex-subparser: 0x22839F16281E67E5Fd395fAFd1571e820CbD46cB
+      # TODO(albion.oracle-server): placeholder; runtime-injected with the
+      # production oracle signer address. Integration tests patch this with
+      # a throwaway signing key.
+      oracle-signer: 0x0000000000000000000000000000000000000000
+      oracle-schema-version: 1
+      baseline-fn: '''curve-npv-baseline'
+      initial-io-fn: '''curve-npv-baseline'
+      next-trade-baseline-multiplier: 0
+      shy-epoch: 0.05
+
+  oil-curve-npv-inv:
+    orderbook: base
+    rainlang: base
+    runs: 1
+    bindings:
+      raindex-subparser: 0x22839F16281E67E5Fd395fAFd1571e820CbD46cB
+      oracle-signer: 0x0000000000000000000000000000000000000000
+      oracle-schema-version: 1
+      baseline-fn: '''curve-npv-baseline-inv'
+      initial-io-fn: '''curve-npv-baseline-inv'
+      next-trade-baseline-multiplier: 0
+      shy-epoch: 0.05
+
+deployments:
+  sell:
+    order: base
+    scenario: oil-curve-npv
+  buy:
+    order: base
+    scenario: oil-curve-npv-inv
+
+gui:
+  name: Oil & gas curve-NPV DCA
+  description: >
+    Auction-DCA with the floor derived from a forward-strip NPV: baked
+    discounted-production buckets (per calendar year) are valued at live
+    Bal/Cal swap levels from the Albion curve oracle. Halts (never
+    misprices) on stale curves, out-of-band prices, metadata revisions,
+    or curve expiry.
+  short-description: >
+    Auction-DCA priced off the live forward strip (curve-NPV floor).
+
+  deployments:
+    sell:
+      name: Sell - Curve NPV DCA
+      description: >
+        Auction-DCA using the forward-strip NPV of baked production
+        buckets as the floor price.
+      deposits:
+        - token: output
+      fields:
+        - binding: benchmark-id
+          name: Benchmark (1=Brent 2=WTI 3=NBP 4=TTF)
+          description: Product 1 price benchmark identifier.
+        - binding: benchmark-2-id
+          name: Benchmark 2 (0=disabled)
+          description: Product 2 price benchmark identifier; 0 for single-product assets.
+        - binding: meta-hash
+          name: Metadata hash
+          description: Hash of the canonical asset metadata at deploy time.
+        - binding: start-time
+          name: Start time
+          description: Unix timestamp anchoring breakpoint 0.
+        - binding: bp-horizon
+          name: Breakpoint horizon (seconds)
+          description: Span of the 5 grid segments; the order halts when now exceeds start-time + horizon.
+        - binding: year-0
+          name: Bucket year 0 (current)
+        - binding: year-1
+          name: Bucket year 1
+        - binding: year-2
+          name: Bucket year 2
+        - binding: year-3
+          name: Bucket year 3
+        - binding: year-4
+          name: Bucket year 4 (also prices the terminal bucket)
+        - binding: db-y0-bp0
+          name: P1 Y0 BP0
+          description: Discounted units/token, product 1, bucket year-0, anchor 0. All grid cells from computeBucketNpvGrid.
+        - binding: db-y0-bp1
+          name: P1 Y0 BP1
+        - binding: db-y0-bp2
+          name: P1 Y0 BP2
+        - binding: db-y0-bp3
+          name: P1 Y0 BP3
+        - binding: db-y0-bp4
+          name: P1 Y0 BP4
+        - binding: db-y0-bp5
+          name: P1 Y0 BP5
+        - binding: db-y1-bp0
+          name: P1 Y1 BP0
+        - binding: db-y1-bp1
+          name: P1 Y1 BP1
+        - binding: db-y1-bp2
+          name: P1 Y1 BP2
+        - binding: db-y1-bp3
+          name: P1 Y1 BP3
+        - binding: db-y1-bp4
+          name: P1 Y1 BP4
+        - binding: db-y1-bp5
+          name: P1 Y1 BP5
+        - binding: db-y2-bp0
+          name: P1 Y2 BP0
+        - binding: db-y2-bp1
+          name: P1 Y2 BP1
+        - binding: db-y2-bp2
+          name: P1 Y2 BP2
+        - binding: db-y2-bp3
+          name: P1 Y2 BP3
+        - binding: db-y2-bp4
+          name: P1 Y2 BP4
+        - binding: db-y2-bp5
+          name: P1 Y2 BP5
+        - binding: db-y3-bp0
+          name: P1 Y3 BP0
+        - binding: db-y3-bp1
+          name: P1 Y3 BP1
+        - binding: db-y3-bp2
+          name: P1 Y3 BP2
+        - binding: db-y3-bp3
+          name: P1 Y3 BP3
+        - binding: db-y3-bp4
+          name: P1 Y3 BP4
+        - binding: db-y3-bp5
+          name: P1 Y3 BP5
+        - binding: db-y4-bp0
+          name: P1 Y4 BP0
+        - binding: db-y4-bp1
+          name: P1 Y4 BP1
+        - binding: db-y4-bp2
+          name: P1 Y4 BP2
+        - binding: db-y4-bp3
+          name: P1 Y4 BP3
+        - binding: db-y4-bp4
+          name: P1 Y4 BP4
+        - binding: db-y4-bp5
+          name: P1 Y4 BP5
+        - binding: db-y5-bp0
+          name: P1 Terminal BP0
+        - binding: db-y5-bp1
+          name: P1 Terminal BP1
+        - binding: db-y5-bp2
+          name: P1 Terminal BP2
+        - binding: db-y5-bp3
+          name: P1 Terminal BP3
+        - binding: db-y5-bp4
+          name: P1 Terminal BP4
+        - binding: db-y5-bp5
+          name: P1 Terminal BP5
+        - binding: db2-y0-bp0
+          name: P2 Y0 BP0
+          description: Product 2 grid; all zeros for single-product assets.
+        - binding: db2-y0-bp1
+          name: P2 Y0 BP1
+        - binding: db2-y0-bp2
+          name: P2 Y0 BP2
+        - binding: db2-y0-bp3
+          name: P2 Y0 BP3
+        - binding: db2-y0-bp4
+          name: P2 Y0 BP4
+        - binding: db2-y0-bp5
+          name: P2 Y0 BP5
+        - binding: db2-y1-bp0
+          name: P2 Y1 BP0
+        - binding: db2-y1-bp1
+          name: P2 Y1 BP1
+        - binding: db2-y1-bp2
+          name: P2 Y1 BP2
+        - binding: db2-y1-bp3
+          name: P2 Y1 BP3
+        - binding: db2-y1-bp4
+          name: P2 Y1 BP4
+        - binding: db2-y1-bp5
+          name: P2 Y1 BP5
+        - binding: db2-y2-bp0
+          name: P2 Y2 BP0
+        - binding: db2-y2-bp1
+          name: P2 Y2 BP1
+        - binding: db2-y2-bp2
+          name: P2 Y2 BP2
+        - binding: db2-y2-bp3
+          name: P2 Y2 BP3
+        - binding: db2-y2-bp4
+          name: P2 Y2 BP4
+        - binding: db2-y2-bp5
+          name: P2 Y2 BP5
+        - binding: db2-y3-bp0
+          name: P2 Y3 BP0
+        - binding: db2-y3-bp1
+          name: P2 Y3 BP1
+        - binding: db2-y3-bp2
+          name: P2 Y3 BP2
+        - binding: db2-y3-bp3
+          name: P2 Y3 BP3
+        - binding: db2-y3-bp4
+          name: P2 Y3 BP4
+        - binding: db2-y3-bp5
+          name: P2 Y3 BP5
+        - binding: db2-y4-bp0
+          name: P2 Y4 BP0
+        - binding: db2-y4-bp1
+          name: P2 Y4 BP1
+        - binding: db2-y4-bp2
+          name: P2 Y4 BP2
+        - binding: db2-y4-bp3
+          name: P2 Y4 BP3
+        - binding: db2-y4-bp4
+          name: P2 Y4 BP4
+        - binding: db2-y4-bp5
+          name: P2 Y4 BP5
+        - binding: db2-y5-bp0
+          name: P2 Terminal BP0
+        - binding: db2-y5-bp1
+          name: P2 Terminal BP1
+        - binding: db2-y5-bp2
+          name: P2 Terminal BP2
+        - binding: db2-y5-bp3
+          name: P2 Terminal BP3
+        - binding: db2-y5-bp4
+          name: P2 Terminal BP4
+        - binding: db2-y5-bp5
+          name: P2 Terminal BP5
+        - binding: net-price-adjustment
+          name: Net price adjustment ($/unit, product 1)
+          description: 'Deducted from the strip price: transportCosts - benchmarkPremium.'
+        - binding: net-price-adjustment-2
+          name: Net price adjustment ($/unit, product 2)
+        - binding: oracle-price-timeout
+          name: Oracle price timeout
+          description: Maximum frame age in seconds, measured from the frame's issued-at.
+          show-custom-field: true
+          default: 172800
+          presets:
+            - name: 1 day (86400)
+              value: 86400
+            - name: 2 days (172800)
+              value: 172800
+            - name: 4 days (345600)
+              value: 345600
+        - binding: price-min
+          name: Price sanity floor ($/unit)
+          description: Halt if any weighted bucket price is at or below this.
+          show-custom-field: true
+          default: 10
+        - binding: price-max
+          name: Price sanity ceiling ($/unit)
+          description: Halt if any weighted bucket price is at or above this.
+          show-custom-field: true
+          default: 500
+        - binding: price-multiplier
+          name: Price multiplier
+          description: 'Multiplier applied to fair value. Example: 0.80 = 20% discount, 1.05 = 5% premium.'
+          show-custom-field: true
+          default: 0.80
+        - binding: hard-floor
+          name: Hard floor ($/token, 0 = disabled)
+          description: Never sell below this price regardless of the computed fair value.
+          show-custom-field: true
+          default: 0
+        - binding: hard-ceiling
+          name: Hard ceiling ($/token)
+          description: Never buy above this price. Set very large to disable (must be > 0).
+          show-custom-field: true
+          default: 1000000000
+        - binding: time-per-amount-epoch
+          name: Budget period (in seconds)
+          description: The budget is spent over this time period.
+          show-custom-field: true
+          presets:
+            - name: Per hour (3600)
+              value: 3600
+            - name: Per day (86400)
+              value: 86400
+            - name: Per week (604800)
+              value: 604800
+            - name: Per 30 days (2592000)
+              value: 2592000
+        - binding: amount-per-epoch
+          name: Budget (${order.outputs.0.token.symbol} per period)
+          description: Amount of ${order.outputs.0.token.symbol} to sell each budget period.
+        - binding: max-trade-amount
+          name: Maximum trade size (${order.outputs.0.token.symbol})
+        - binding: min-trade-amount
+          name: Minimum trade size (${order.outputs.0.token.symbol})
+        - binding: time-per-trade-epoch
+          name: Auction period (in seconds)
+          description: Time between each auction price halvening.
+          show-custom-field: true
+          default: 3600
+          presets:
+            - name: Every 20 minutes (1200)
+              value: 1200
+            - name: Every hour (3600)
+              value: 3600
+            - name: Every 6 hours (21600)
+              value: 21600
+            - name: Every 24 hours (86400)
+              value: 86400
+        - binding: next-trade-multiplier
+          name: Auction start multiplier
+          description: Multiplier to apply to the last trade to kick off the next auction.
+          show-custom-field: true
+          default: 1.01
+          presets:
+            - name: 1.01x
+              value: 1.01
+            - name: 1.05x
+              value: 1.05
+            - name: 1.10x
+              value: 1.10
+      select-tokens:
+        - key: output
+          name: Token to Sell
+          description: Select the reserve token you want to sell
+        - key: input
+          name: Token to Buy
+          description: Select the payment token you want to receive
+
+    buy:
+      name: Buy - Curve NPV DCA
+      description: Inverse orientation -- buy reserve tokens against the curve-NPV floor.
+      deposits:
+        - token: output
+      fields:
+        - binding: benchmark-id
+          name: Benchmark (1=Brent 2=WTI 3=NBP 4=TTF)
+        - binding: benchmark-2-id
+          name: Benchmark 2 (0=disabled)
+        - binding: meta-hash
+          name: Metadata hash
+        - binding: start-time
+          name: Start time
+        - binding: bp-horizon
+          name: Breakpoint horizon (seconds)
+        - binding: year-0
+          name: Bucket year 0 (current)
+        - binding: year-1
+          name: Bucket year 1
+        - binding: year-2
+          name: Bucket year 2
+        - binding: year-3
+          name: Bucket year 3
+        - binding: year-4
+          name: Bucket year 4 (also prices the terminal bucket)
+        - binding: db-y0-bp0
+          name: P1 Y0 BP0
+        - binding: db-y0-bp1
+          name: P1 Y0 BP1
+        - binding: db-y0-bp2
+          name: P1 Y0 BP2
+        - binding: db-y0-bp3
+          name: P1 Y0 BP3
+        - binding: db-y0-bp4
+          name: P1 Y0 BP4
+        - binding: db-y0-bp5
+          name: P1 Y0 BP5
+        - binding: db-y1-bp0
+          name: P1 Y1 BP0
+        - binding: db-y1-bp1
+          name: P1 Y1 BP1
+        - binding: db-y1-bp2
+          name: P1 Y1 BP2
+        - binding: db-y1-bp3
+          name: P1 Y1 BP3
+        - binding: db-y1-bp4
+          name: P1 Y1 BP4
+        - binding: db-y1-bp5
+          name: P1 Y1 BP5
+        - binding: db-y2-bp0
+          name: P1 Y2 BP0
+        - binding: db-y2-bp1
+          name: P1 Y2 BP1
+        - binding: db-y2-bp2
+          name: P1 Y2 BP2
+        - binding: db-y2-bp3
+          name: P1 Y2 BP3
+        - binding: db-y2-bp4
+          name: P1 Y2 BP4
+        - binding: db-y2-bp5
+          name: P1 Y2 BP5
+        - binding: db-y3-bp0
+          name: P1 Y3 BP0
+        - binding: db-y3-bp1
+          name: P1 Y3 BP1
+        - binding: db-y3-bp2
+          name: P1 Y3 BP2
+        - binding: db-y3-bp3
+          name: P1 Y3 BP3
+        - binding: db-y3-bp4
+          name: P1 Y3 BP4
+        - binding: db-y3-bp5
+          name: P1 Y3 BP5
+        - binding: db-y4-bp0
+          name: P1 Y4 BP0
+        - binding: db-y4-bp1
+          name: P1 Y4 BP1
+        - binding: db-y4-bp2
+          name: P1 Y4 BP2
+        - binding: db-y4-bp3
+          name: P1 Y4 BP3
+        - binding: db-y4-bp4
+          name: P1 Y4 BP4
+        - binding: db-y4-bp5
+          name: P1 Y4 BP5
+        - binding: db-y5-bp0
+          name: P1 Terminal BP0
+        - binding: db-y5-bp1
+          name: P1 Terminal BP1
+        - binding: db-y5-bp2
+          name: P1 Terminal BP2
+        - binding: db-y5-bp3
+          name: P1 Terminal BP3
+        - binding: db-y5-bp4
+          name: P1 Terminal BP4
+        - binding: db-y5-bp5
+          name: P1 Terminal BP5
+        - binding: db2-y0-bp0
+          name: P2 Y0 BP0
+        - binding: db2-y0-bp1
+          name: P2 Y0 BP1
+        - binding: db2-y0-bp2
+          name: P2 Y0 BP2
+        - binding: db2-y0-bp3
+          name: P2 Y0 BP3
+        - binding: db2-y0-bp4
+          name: P2 Y0 BP4
+        - binding: db2-y0-bp5
+          name: P2 Y0 BP5
+        - binding: db2-y1-bp0
+          name: P2 Y1 BP0
+        - binding: db2-y1-bp1
+          name: P2 Y1 BP1
+        - binding: db2-y1-bp2
+          name: P2 Y1 BP2
+        - binding: db2-y1-bp3
+          name: P2 Y1 BP3
+        - binding: db2-y1-bp4
+          name: P2 Y1 BP4
+        - binding: db2-y1-bp5
+          name: P2 Y1 BP5
+        - binding: db2-y2-bp0
+          name: P2 Y2 BP0
+        - binding: db2-y2-bp1
+          name: P2 Y2 BP1
+        - binding: db2-y2-bp2
+          name: P2 Y2 BP2
+        - binding: db2-y2-bp3
+          name: P2 Y2 BP3
+        - binding: db2-y2-bp4
+          name: P2 Y2 BP4
+        - binding: db2-y2-bp5
+          name: P2 Y2 BP5
+        - binding: db2-y3-bp0
+          name: P2 Y3 BP0
+        - binding: db2-y3-bp1
+          name: P2 Y3 BP1
+        - binding: db2-y3-bp2
+          name: P2 Y3 BP2
+        - binding: db2-y3-bp3
+          name: P2 Y3 BP3
+        - binding: db2-y3-bp4
+          name: P2 Y3 BP4
+        - binding: db2-y3-bp5
+          name: P2 Y3 BP5
+        - binding: db2-y4-bp0
+          name: P2 Y4 BP0
+        - binding: db2-y4-bp1
+          name: P2 Y4 BP1
+        - binding: db2-y4-bp2
+          name: P2 Y4 BP2
+        - binding: db2-y4-bp3
+          name: P2 Y4 BP3
+        - binding: db2-y4-bp4
+          name: P2 Y4 BP4
+        - binding: db2-y4-bp5
+          name: P2 Y4 BP5
+        - binding: db2-y5-bp0
+          name: P2 Terminal BP0
+        - binding: db2-y5-bp1
+          name: P2 Terminal BP1
+        - binding: db2-y5-bp2
+          name: P2 Terminal BP2
+        - binding: db2-y5-bp3
+          name: P2 Terminal BP3
+        - binding: db2-y5-bp4
+          name: P2 Terminal BP4
+        - binding: db2-y5-bp5
+          name: P2 Terminal BP5
+        - binding: net-price-adjustment
+          name: Net price adjustment ($/unit, product 1)
+        - binding: net-price-adjustment-2
+          name: Net price adjustment ($/unit, product 2)
+        - binding: oracle-price-timeout
+          name: Oracle price timeout
+          show-custom-field: true
+          default: 172800
+          presets:
+            - name: 1 day (86400)
+              value: 86400
+            - name: 2 days (172800)
+              value: 172800
+            - name: 4 days (345600)
+              value: 345600
+        - binding: price-min
+          name: Price sanity floor ($/unit)
+          show-custom-field: true
+          default: 10
+        - binding: price-max
+          name: Price sanity ceiling ($/unit)
+          show-custom-field: true
+          default: 500
+        - binding: price-multiplier
+          name: Price multiplier
+          show-custom-field: true
+          default: 0.80
+        - binding: hard-floor
+          name: Hard floor ($/token, 0 = disabled)
+          show-custom-field: true
+          default: 0
+        - binding: hard-ceiling
+          name: Hard ceiling ($/token)
+          show-custom-field: true
+          default: 1000000000
+        - binding: time-per-amount-epoch
+          name: Budget period (in seconds)
+          show-custom-field: true
+          presets:
+            - name: Per hour (3600)
+              value: 3600
+            - name: Per day (86400)
+              value: 86400
+            - name: Per week (604800)
+              value: 604800
+            - name: Per 30 days (2592000)
+              value: 2592000
+        - binding: amount-per-epoch
+          name: Budget (${order.outputs.0.token.symbol} per period)
+        - binding: max-trade-amount
+          name: Maximum trade size (${order.outputs.0.token.symbol})
+        - binding: min-trade-amount
+          name: Minimum trade size (${order.outputs.0.token.symbol})
+        - binding: time-per-trade-epoch
+          name: Auction period (in seconds)
+          show-custom-field: true
+          default: 3600
+          presets:
+            - name: Every 20 minutes (1200)
+              value: 1200
+            - name: Every hour (3600)
+              value: 3600
+            - name: Every 6 hours (21600)
+              value: 21600
+            - name: Every 24 hours (86400)
+              value: 86400
+        - binding: next-trade-multiplier
+          name: Auction start multiplier
+          show-custom-field: true
+          default: 1.01
+          presets:
+            - name: 1.01x
+              value: 1.01
+            - name: 1.05x
+              value: 1.05
+            - name: 1.10x
+              value: 1.10
+      select-tokens:
+        - key: output
+          name: Token to Sell
+          description: Select the reserve token you want to sell
+        - key: input
+          name: Token to Buy
+          description: Select the payment token you want to receive
+
+---
+#raindex-subparser !Raindex subparser.
+
+#oracle-signer !Trusted oracle signer address (EIP-191 signer of the curve frame).
+#oracle-schema-version !Expected frame schema version (= 1).
+
+#time-per-amount-epoch !Duration of one unit of streaming amount halflife.
+#amount-per-epoch !Amount of output token to approve for buying per epoch.
+#min-trade-amount !Each trade must be at least this many output tokens.
+#max-trade-amount !Each trade will be capped at this many tokens.
+
+#time-per-trade-epoch !Duration of one unit of io ratio halflife.
+#shy-epoch !Epoch below which only the minimum amount is offered.
+
+#baseline-fn !Function to calculate the baseline for the next trade.
+#initial-io-fn !Function to calculate the initial io ratio for the first trade.
+
+#next-trade-multiplier !Start next auction at this x the last trade.
+#next-trade-baseline-multiplier !Lifts the baseline to here relative to the previous trade.
+
+#benchmark-id !Product 1 benchmark: 1=Brent 2=WTI 3=NBP 4=TTF.
+#benchmark-2-id !Product 2 benchmark; 0 disables product 2.
+#meta-hash !Hash of the canonical asset metadata baked at deploy time.
+#start-time !Unix timestamp anchoring grid breakpoint 0.
+#bp-horizon !Seconds spanned by the 5 grid segments; order halts past start-time + bp-horizon.
+
+#year-0 !Calendar year of bucket 0 (deploy year; oracle key holds Bal average).
+#year-1 !Calendar year of bucket 1.
+#year-2 !Calendar year of bucket 2.
+#year-3 !Calendar year of bucket 3.
+#year-4 !Calendar year of bucket 4; also prices the terminal bucket (strip-then-flat).
+
+/* Curve-NPV grid (deploy-time scalars from computeBucketNpvGrid).
+   db-y{b}-bp{k} = discounted units per token at breakpoint anchor k
+   attributable to calendar-year bucket b. Bucket 5 is the terminal
+   bucket (all months beyond year-4), priced at year-4's frame row.
+   Product 2 (db2-*) is all zeros for single-product assets and its
+   band checks self-skip on zero weight. */
+#db-y0-bp0 !P1 bucket 0 anchor 0.
+#db-y0-bp1 !P1 bucket 0 anchor 1.
+#db-y0-bp2 !P1 bucket 0 anchor 2.
+#db-y0-bp3 !P1 bucket 0 anchor 3.
+#db-y0-bp4 !P1 bucket 0 anchor 4.
+#db-y0-bp5 !P1 bucket 0 anchor 5.
+#db-y1-bp0 !P1 bucket 1 anchor 0.
+#db-y1-bp1 !P1 bucket 1 anchor 1.
+#db-y1-bp2 !P1 bucket 1 anchor 2.
+#db-y1-bp3 !P1 bucket 1 anchor 3.
+#db-y1-bp4 !P1 bucket 1 anchor 4.
+#db-y1-bp5 !P1 bucket 1 anchor 5.
+#db-y2-bp0 !P1 bucket 2 anchor 0.
+#db-y2-bp1 !P1 bucket 2 anchor 1.
+#db-y2-bp2 !P1 bucket 2 anchor 2.
+#db-y2-bp3 !P1 bucket 2 anchor 3.
+#db-y2-bp4 !P1 bucket 2 anchor 4.
+#db-y2-bp5 !P1 bucket 2 anchor 5.
+#db-y3-bp0 !P1 bucket 3 anchor 0.
+#db-y3-bp1 !P1 bucket 3 anchor 1.
+#db-y3-bp2 !P1 bucket 3 anchor 2.
+#db-y3-bp3 !P1 bucket 3 anchor 3.
+#db-y3-bp4 !P1 bucket 3 anchor 4.
+#db-y3-bp5 !P1 bucket 3 anchor 5.
+#db-y4-bp0 !P1 bucket 4 anchor 0.
+#db-y4-bp1 !P1 bucket 4 anchor 1.
+#db-y4-bp2 !P1 bucket 4 anchor 2.
+#db-y4-bp3 !P1 bucket 4 anchor 3.
+#db-y4-bp4 !P1 bucket 4 anchor 4.
+#db-y4-bp5 !P1 bucket 4 anchor 5.
+#db-y5-bp0 !P1 terminal bucket anchor 0.
+#db-y5-bp1 !P1 terminal bucket anchor 1.
+#db-y5-bp2 !P1 terminal bucket anchor 2.
+#db-y5-bp3 !P1 terminal bucket anchor 3.
+#db-y5-bp4 !P1 terminal bucket anchor 4.
+#db-y5-bp5 !P1 terminal bucket anchor 5.
+#db2-y0-bp0 !P2 bucket 0 anchor 0.
+#db2-y0-bp1 !P2 bucket 0 anchor 1.
+#db2-y0-bp2 !P2 bucket 0 anchor 2.
+#db2-y0-bp3 !P2 bucket 0 anchor 3.
+#db2-y0-bp4 !P2 bucket 0 anchor 4.
+#db2-y0-bp5 !P2 bucket 0 anchor 5.
+#db2-y1-bp0 !P2 bucket 1 anchor 0.
+#db2-y1-bp1 !P2 bucket 1 anchor 1.
+#db2-y1-bp2 !P2 bucket 1 anchor 2.
+#db2-y1-bp3 !P2 bucket 1 anchor 3.
+#db2-y1-bp4 !P2 bucket 1 anchor 4.
+#db2-y1-bp5 !P2 bucket 1 anchor 5.
+#db2-y2-bp0 !P2 bucket 2 anchor 0.
+#db2-y2-bp1 !P2 bucket 2 anchor 1.
+#db2-y2-bp2 !P2 bucket 2 anchor 2.
+#db2-y2-bp3 !P2 bucket 2 anchor 3.
+#db2-y2-bp4 !P2 bucket 2 anchor 4.
+#db2-y2-bp5 !P2 bucket 2 anchor 5.
+#db2-y3-bp0 !P2 bucket 3 anchor 0.
+#db2-y3-bp1 !P2 bucket 3 anchor 1.
+#db2-y3-bp2 !P2 bucket 3 anchor 2.
+#db2-y3-bp3 !P2 bucket 3 anchor 3.
+#db2-y3-bp4 !P2 bucket 3 anchor 4.
+#db2-y3-bp5 !P2 bucket 3 anchor 5.
+#db2-y4-bp0 !P2 bucket 4 anchor 0.
+#db2-y4-bp1 !P2 bucket 4 anchor 1.
+#db2-y4-bp2 !P2 bucket 4 anchor 2.
+#db2-y4-bp3 !P2 bucket 4 anchor 3.
+#db2-y4-bp4 !P2 bucket 4 anchor 4.
+#db2-y4-bp5 !P2 bucket 4 anchor 5.
+#db2-y5-bp0 !P2 terminal bucket anchor 0.
+#db2-y5-bp1 !P2 terminal bucket anchor 1.
+#db2-y5-bp2 !P2 terminal bucket anchor 2.
+#db2-y5-bp3 !P2 terminal bucket anchor 3.
+#db2-y5-bp4 !P2 terminal bucket anchor 4.
+#db2-y5-bp5 !P2 terminal bucket anchor 5.
+
+#net-price-adjustment !Deducted from the strip price for product 1: transportCosts - benchmarkPremium ($/unit).
+#net-price-adjustment-2 !Deducted from the strip price for product 2 ($/unit).
+
+#oracle-price-timeout !Maximum frame age in seconds, measured from the frame's issued-at.
+#price-min !Sanity band floor; halt if any weighted bucket price <= this.
+#price-max !Sanity band ceiling; halt if any weighted bucket price >= this.
+
+#price-multiplier !Multiplier applied to fair value. < 1 = discount, > 1 = premium.
+#hard-floor !Never sell below this $/token (0 disables).
+#hard-ceiling !Never buy above this $/token (must be > 0; set very large to disable).
+
+#last-trade-time-key "last-trade-time"
+#last-trade-io-key "last-trade-io"
+#initial-time-key "initial-time"
+#amount-used-key "amount-used"
+
+/* ==========================================================
+   CURVE-NPV PRICING
+   6 calendar-year buckets x 5 grid segments per product.
+   fair value = sum over buckets of
+     interp(bucket grid, now) x (bucket frame price - adjustment)
+   Strip prices arrive as an oracle-signed context frame (see
+   #frame-guards); freshness/signer/pair/meta checks are frame-level
+   there. Every weighted bucket enforces the sanity band; buckets with
+   zero interpolated weight skip it (Rainlang evaluates eagerly, and
+   drained/disabled buckets carry price 0 which must not trip the band).
+   ========================================================== */
+
+/* Albion curve frame, schema v1 -- one signed context array (19 rows,
+   all bytes32) attached by the taker to takeOrders4/quote2 and
+   signature-verified by the orderbook against the trusted signer:
+     row 0     : schema version (= 1)
+     row 1     : input token address (left-padded bytes32)
+     row 2     : output token address (left-padded bytes32)
+     row 3     : issued-at, unix seconds
+     row 4     : expires-at, unix seconds
+     row 5     : metaHash of the canonical asset metadata
+     row 6     : benchmark-1 id (1=Brent 2=WTI 3=NBP 4=TTF)
+     row 7     : base-year (absolute calendar year of row 8)
+     rows 8-12 : benchmark-1 prices, base-year+0 .. +4 (USD)
+     row 13    : benchmark-2 id (0 = none)
+     rows 14-18: benchmark-2 prices, base-year+0 .. +4 (0s when row 13 = 0)
+   Rows are pinned positionally: signed-context operands are parse-time
+   literals (no dynamic indexing in Rainlang), so year alignment is
+   enforced by requiring row 7 == year-0.
+   NOTE: no using-words-from here -- the on-chain parser accepts the
+   pragma only at the top of the composed document, so it lives in the
+   entrypoints (#calculate-io / #handle-add-order) and covers every
+   called function. */
+#frame-guards
+:ensure(equal-to(signer<0>() oracle-signer) "untrusted signer"),
+:ensure(equal-to(signed-context<0 0>() oracle-schema-version) "frame schema"),
+:ensure(equal-to(signed-context<0 1>() input-token()) "frame input token"),
+:ensure(equal-to(signed-context<0 2>() output-token()) "frame output token"),
+issued: signed-context<0 3>(),
+:ensure(greater-than-or-equal-to(now() issued) "frame from future"),
+:ensure(less-than-or-equal-to(now() signed-context<0 4>()) "frame expired"),
+:ensure(less-than(sub(now() issued) oracle-price-timeout) "frame too old"),
+:ensure(equal-to(signed-context<0 5>() meta-hash) "meta-revised"),
+:ensure(equal-to(signed-context<0 6>() benchmark-id) "benchmark mismatch"),
+:ensure(equal-to(signed-context<0 7>() year-0) "base-year mismatch"),
+:ensure(equal-to(signed-context<0 13>() benchmark-2-id) "benchmark2 mismatch");
+
+/* Piecewise-linear interpolation across the 5 segments of one bucket. */
+#bucket-interp
+bp-a bp-b bp-c bp-d bp-e bp-f seg-index within:,
+v0: add(bp-a mul(sub(bp-b bp-a) within)),
+v1: add(bp-b mul(sub(bp-c bp-b) within)),
+v2: add(bp-c mul(sub(bp-d bp-c) within)),
+v3: add(bp-d mul(sub(bp-e bp-d) within)),
+v4: add(bp-e mul(sub(bp-f bp-e) within)),
+_: conditions(
+     less-than(seg-index 1) v0
+     less-than(seg-index 2) v1
+     less-than(seg-index 3) v2
+     less-than(seg-index 4) v3
+     v4
+   );
+
+/* One bucket's contribution to fair value. The bucket's frame price is
+   read once in #curve-npv-floor and passed in. The sanity-band check is
+   skipped when the bucket's interpolated weight is zero (zeroed product
+   2, drained past-year buckets carry price 0 which must not trip the
+   band -- Rainlang evaluates eagerly). Freshness is frame-level in
+   #frame-guards. A single shared ensure message is used across buckets
+   to keep this a shared function. */
+#bucket-contribution
+price adj bp-a bp-b bp-c bp-d bp-e bp-f seg-index within:,
+weight: call<'bucket-interp>(bp-a bp-b bp-c bp-d bp-e bp-f seg-index within),
+in-band: every(greater-than(price price-min) less-than(price price-max)),
+:ensure(any(is-zero(weight) in-band) "bucket price out of band"),
+_: mul(weight max(0 sub(price adj)));
+
+/* Fair value at now(): each bucket's interpolated discounted-unit
+   weight, priced at the frame's strip rows. Terminal buckets (c5/d5)
+   reuse the year-4 price (frame rows 12 / 18) -- the same
+   strip-then-flat convention as before. Subparser words resolve via the
+   entrypoints' document-top using-words-from pragma. */
+#curve-npv-floor
+p1-y0: signed-context<0 8>(),
+p1-y1: signed-context<0 9>(),
+p1-y2: signed-context<0 10>(),
+p1-y3: signed-context<0 11>(),
+p1-y4: signed-context<0 12>(),
+p2-y0: signed-context<0 14>(),
+p2-y1: signed-context<0 15>(),
+p2-y2: signed-context<0 16>(),
+p2-y3: signed-context<0 17>(),
+p2-y4: signed-context<0 18>(),
+elapsed: sub(now() start-time),
+t-frac: min(div(elapsed bp-horizon) 1),
+scaled: mul(t-frac 5),
+seg-index: floor(scaled),
+within: frac(scaled),
+c0: call<'bucket-contribution>(p1-y0 net-price-adjustment db-y0-bp0 db-y0-bp1 db-y0-bp2 db-y0-bp3 db-y0-bp4 db-y0-bp5 seg-index within),
+c1: call<'bucket-contribution>(p1-y1 net-price-adjustment db-y1-bp0 db-y1-bp1 db-y1-bp2 db-y1-bp3 db-y1-bp4 db-y1-bp5 seg-index within),
+c2: call<'bucket-contribution>(p1-y2 net-price-adjustment db-y2-bp0 db-y2-bp1 db-y2-bp2 db-y2-bp3 db-y2-bp4 db-y2-bp5 seg-index within),
+c3: call<'bucket-contribution>(p1-y3 net-price-adjustment db-y3-bp0 db-y3-bp1 db-y3-bp2 db-y3-bp3 db-y3-bp4 db-y3-bp5 seg-index within),
+c4: call<'bucket-contribution>(p1-y4 net-price-adjustment db-y4-bp0 db-y4-bp1 db-y4-bp2 db-y4-bp3 db-y4-bp4 db-y4-bp5 seg-index within),
+c5: call<'bucket-contribution>(p1-y4 net-price-adjustment db-y5-bp0 db-y5-bp1 db-y5-bp2 db-y5-bp3 db-y5-bp4 db-y5-bp5 seg-index within),
+d0: call<'bucket-contribution>(p2-y0 net-price-adjustment-2 db2-y0-bp0 db2-y0-bp1 db2-y0-bp2 db2-y0-bp3 db2-y0-bp4 db2-y0-bp5 seg-index within),
+d1: call<'bucket-contribution>(p2-y1 net-price-adjustment-2 db2-y1-bp0 db2-y1-bp1 db2-y1-bp2 db2-y1-bp3 db2-y1-bp4 db2-y1-bp5 seg-index within),
+d2: call<'bucket-contribution>(p2-y2 net-price-adjustment-2 db2-y2-bp0 db2-y2-bp1 db2-y2-bp2 db2-y2-bp3 db2-y2-bp4 db2-y2-bp5 seg-index within),
+d3: call<'bucket-contribution>(p2-y3 net-price-adjustment-2 db2-y3-bp0 db2-y3-bp1 db2-y3-bp2 db2-y3-bp3 db2-y3-bp4 db2-y3-bp5 seg-index within),
+d4: call<'bucket-contribution>(p2-y4 net-price-adjustment-2 db2-y4-bp0 db2-y4-bp1 db2-y4-bp2 db2-y4-bp3 db2-y4-bp4 db2-y4-bp5 seg-index within),
+d5: call<'bucket-contribution>(p2-y4 net-price-adjustment-2 db2-y5-bp0 db2-y5-bp1 db2-y5-bp2 db2-y5-bp3 db2-y5-bp4 db2-y5-bp5 seg-index within),
+p1: add(add(add(c0 c1) add(c2 c3)) add(c4 c5)),
+p2: add(add(add(d0 d1) add(d2 d3)) add(d4 d5)),
+fair-value: add(p1 p2),
+_: mul(fair-value price-multiplier);
+
+#curve-npv-baseline
+_: max(call<'curve-npv-floor>() hard-floor);
+
+#curve-npv-baseline-inv
+_: max(inv(call<'curve-npv-floor>()) inv(hard-ceiling));
+
+/* ==========================================================
+   AUCTION DCA MECHANICS (lifted verbatim from oil-token-projection-npv-dca.rain)
+   ========================================================== */
+
+#set-last-trade
+last-io:,
+:set(hash(order-hash() last-trade-time-key) now()),
+:set(hash(order-hash() last-trade-io-key) last-io);
+
+#set-initial-time
+:set(hash(order-hash() initial-time-key) now());
+
+#get-initial-time
+_:get(hash(order-hash() initial-time-key));
+
+#get-last-trade
+last-time:get(hash(order-hash() last-trade-time-key)),
+last-io:get(hash(order-hash() last-trade-io-key));
+
+#get-epoch
+initial-time: call<'get-initial-time>(),
+last-time _: call<'get-last-trade>(),
+duration: sub(now() any(last-time initial-time)),
+total-duration: sub(now() initial-time),
+ratio-freeze-amount-epochs: div(min-trade-amount amount-per-epoch),
+ratio-freeze-trade-epochs: mul(ratio-freeze-amount-epochs div(time-per-amount-epoch time-per-trade-epoch)),
+amount-epochs: div(total-duration time-per-amount-epoch),
+trade-epochs: max(0 sub(div(duration time-per-trade-epoch) ratio-freeze-trade-epochs));
+
+#amount-for-epoch
+amount-epochs
+trade-epochs:,
+total-available: linear-growth(0 amount-per-epoch amount-epochs),
+used: get(hash(order-hash() amount-used-key)),
+unused: sub(total-available used),
+decay: call<'halflife>(trade-epochs),
+shy-decay: every(greater-than(trade-epochs shy-epoch) decay),
+variable-component: sub(max-trade-amount min-trade-amount),
+target-amount: add(min-trade-amount mul(variable-component shy-decay)),
+capped-unused: min(unused target-amount);
+
+#halflife
+epoch:,
+val: power(0.5 epoch);
+
+#io-for-epoch
+epoch:,
+last-io: call<'get-last-trade>(),
+max-next-trade: any(mul(last-io next-trade-multiplier) call<'initial-io-fn>()),
+baseline-next-trade: mul(last-io next-trade-baseline-multiplier),
+real-baseline: max(baseline-next-trade call<'baseline-fn>()),
+variable-component: max(0 sub(max-next-trade real-baseline)),
+above-baseline: mul(variable-component call<'halflife>(epoch)),
+_: add(real-baseline above-baseline);
+
+/* ==========================================================
+   ORDER LIFECYCLE
+   ========================================================== */
+
+#handle-add-order
+using-words-from raindex-subparser
+:ensure(greater-than(bp-horizon 0) "horizon>0"),
+:ensure(greater-than(price-multiplier 0) "mult>0"),
+:ensure(less-than(price-min price-max) "band min<max"),
+:ensure(greater-than(oracle-price-timeout 0) "timeout>0"),
+:ensure(greater-than(oracle-schema-version 0) "schema>0"),
+:ensure(greater-than(hard-ceiling 0) "ceiling>0"),
+:ensure(greater-than-or-equal-to(hard-floor 0) "floor>=0"),
+:ensure(greater-than-or-equal-to(benchmark-id 1) "benchmark low"),
+:ensure(less-than-or-equal-to(benchmark-id 4) "benchmark high"),
+:ensure(less-than-or-equal-to(benchmark-2-id 4) "benchmark2 high"),
+:ensure(is-zero(sub(year-1 add(year-0 1))) "years 0-1"),
+:ensure(is-zero(sub(year-2 add(year-1 1))) "years 1-2"),
+:ensure(is-zero(sub(year-3 add(year-2 1))) "years 2-3"),
+:ensure(is-zero(sub(year-4 add(year-3 1))) "years 3-4"),
+total-a0: add(add(add(db-y0-bp0 db-y1-bp0) add(db-y2-bp0 db-y3-bp0)) add(db-y4-bp0 db-y5-bp0)),
+total-a5: add(add(add(db-y0-bp5 db-y1-bp5) add(db-y2-bp5 db-y3-bp5)) add(db-y4-bp5 db-y5-bp5)),
+:ensure(greater-than(total-a0 0) "bp0>0"),
+:ensure(greater-than-or-equal-to(total-a0 total-a5) "endpoint"),
+total2-a0: add(add(add(db2-y0-bp0 db2-y1-bp0) add(db2-y2-bp0 db2-y3-bp0)) add(db2-y4-bp0 db2-y5-bp0)),
+total2-a5: add(add(add(db2-y0-bp5 db2-y1-bp5) add(db2-y2-bp5 db2-y3-bp5)) add(db2-y4-bp5 db2-y5-bp5)),
+:ensure(any(is-zero(total2-a0) greater-than(benchmark-2-id 0)) "benchmark2 required"),
+:ensure(greater-than-or-equal-to(total2-a0 total2-a5) "endpoint2"),
+/* No signed context exists at add time -- the metadata-revision guard
+   lives in #frame-guards against the deploy-time meta-hash binding. */
+:call<'set-initial-time>();
+
+#calculate-io
+using-words-from raindex-subparser
+:ensure(greater-than-or-equal-to(now() start-time) "not started"),
+:ensure(less-than(now() add(start-time bp-horizon)) "curve-expired"),
+:call<'frame-guards>(),
+amount-epochs
+trade-epochs:call<'get-epoch>(),
+max-output: call<'amount-for-epoch>(amount-epochs trade-epochs),
+io: call<'io-for-epoch>(trade-epochs),
+:call<'set-last-trade>(io);
+
+#handle-io
+min-amount: mul(min-trade-amount 0.9),
+:ensure(greater-than-or-equal-to(output-vault-decrease() min-amount) "Min trade amount."),
+used: get(hash(order-hash() amount-used-key)),
+:set(hash(order-hash() amount-used-key) add(used output-vault-decrease()));
