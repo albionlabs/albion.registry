@@ -2,11 +2,20 @@ version: 5
 
 orders:
   base:
-    orderbook: base
-    # TODO(albion.oracle-server): placeholder; runtime-injected by the client
-    # (like the RPC URL) once the production oracle server is live. The taker
-    # fetches an oracle-signed context frame from this URL per trade.
-    oracle-url: https://oracle.albionlabs.org/context/v1
+    raindex: base
+    # STAGING oracle -- live and verified 2026-07-30 (GET /status reports
+    # signer 0xced8...dc78 with all four strips warm). The taker fetches
+    # the signed 5-frame bundle from this URL per trade and attaches it to
+    # takeOrders4 / quote2; the orderbook verifies each frame separately.
+    #
+    # TODO(prod): production is
+    #   https://albion-oracle-nu5w4hcuuq-ey.a.run.app/context/v1
+    # signing with 0x818D8Db28E07eaE7c75026D53cA4CCBeB5ee7b3D. This URL and
+    # the `oracle-signer` binding below MUST be flipped in the same change:
+    # either one alone halts every order. The same applies to a KMS
+    # cryptoKeyVersion bump, which changes the signer address -- signer
+    # rotation is a strategy migration, not an ops action (spec s16.6).
+    oracle-url: https://albion-oracle-mrflki6foq-ey.a.run.app/context/v1
     inputs:
       - token: input
     outputs:
@@ -22,29 +31,63 @@ scenarios:
   # curve-NPV floor (sell) or its inverse (buy). Halts (never
   # misprices) on stale frames, out-of-band prices, metadata revisions,
   # or curve expiry.
-  # Grid from computeBucketNpvGrid in src/lib/services/deploymentArgs.ts.
-  # Spec: docs/superpowers/specs/2026-07-03-curve-npv-oracle-strategy-design.md (s15)
+  # Grid from computeBucketNpvGrid in albion.dex
+  # src/lib/services/deploymentArgs.ts.
+  # Migrated 2026-07-30 from the s15 19-row single frame to the AS-BUILT
+  # 5-frame bundle. Normative frame reference: albionlabs/albion.oracle-server
+  # README.md + src/oracle.rs. Rationale: design spec s16.
   oil-curve-npv-limit:
-    orderbook: base
+    raindex: base
     rainlang: base
     runs: 1
     bindings:
       raindex-subparser: 0x22839F16281E67E5Fd395fAFd1571e820CbD46cB
-      # TODO(albion.oracle-server): placeholder; runtime-injected with the
-      # production oracle signer address. Integration tests patch this with
-      # a throwaway signing key.
-      oracle-signer: 0x0000000000000000000000000000000000000000
-      oracle-schema-version: 1
+      # STAGING signer. TODO(prod): flip together with `oracle-url` above.
+      # Integration tests patch this with a throwaway signing key.
+      oracle-signer: 0xCEd8AAb28809FbeAa9DE9E576A6255663C58DC78
+      benchmark-schema-version: 2
+      asset-schema-version: 3
+      # Slot pinning -- spec s16.4(c) option (i). The /context/v1 bundle
+      # order is FIXED and positional:
+      #   [0] Brent  [1] WTI  [2] NBP  [3] TTF  [4] asset metahash
+      # Wressle-1 is Brent-linked, so benchmark-slot 0. A gas asset needs a
+      # sibling scenario pinning 2 (NBP) or 3 (TTF); nothing else changes.
+      benchmark-slot: 0
+      asset-slot: 4
+      # Single-product asset: product 2 is disabled by never reading a
+      # second benchmark slot (spec s16.4(c)), so it costs no signer /
+      # schema / freshness guard set. benchmark-2-slot is inert here.
+      product-2-fn: '''product-2-off'
+      benchmark-2-slot: 1
+      # The oracle derives the asset from the order's IO pair (whichever
+      # side is not the quote token), so this must name the same side.
+      asset-id: ${order.outputs.0.token.address}
       target-io-fn: '''curve-npv-limit-io'
 
   oil-curve-npv-limit-inv:
-    orderbook: base
+    raindex: base
     rainlang: base
     runs: 1
     bindings:
       raindex-subparser: 0x22839F16281E67E5Fd395fAFd1571e820CbD46cB
-      oracle-signer: 0x0000000000000000000000000000000000000000
-      oracle-schema-version: 1
+      oracle-signer: 0xCEd8AAb28809FbeAa9DE9E576A6255663C58DC78
+      benchmark-schema-version: 2
+      asset-schema-version: 3
+      # Slot pinning -- spec s16.4(c) option (i). The /context/v1 bundle
+      # order is FIXED and positional:
+      #   [0] Brent  [1] WTI  [2] NBP  [3] TTF  [4] asset metahash
+      # Wressle-1 is Brent-linked, so benchmark-slot 0. A gas asset needs a
+      # sibling scenario pinning 2 (NBP) or 3 (TTF); nothing else changes.
+      benchmark-slot: 0
+      asset-slot: 4
+      # Single-product asset: product 2 is disabled by never reading a
+      # second benchmark slot (spec s16.4(c)), so it costs no signer /
+      # schema / freshness guard set. benchmark-2-slot is inert here.
+      product-2-fn: '''product-2-off'
+      benchmark-2-slot: 1
+      # The oracle derives the asset from the order's IO pair (whichever
+      # side is not the quote token), so this must name the same side.
+      asset-id: ${order.inputs.0.token.address}
       target-io-fn: '''curve-npv-limit-io-inv'
 
 deployments:
@@ -509,8 +552,14 @@ gui:
 ---
 #raindex-subparser !Raindex subparser.
 
-#oracle-signer !Trusted oracle signer address (EIP-191 signer of the curve frame).
-#oracle-schema-version !Expected frame schema version (= 1).
+#oracle-signer !Trusted EIP-191 signer of every consumed oracle frame.
+#benchmark-schema-version !Expected benchmark frame schema version (= 2).
+#asset-schema-version !Expected asset metahash frame schema version (= 3).
+#benchmark-slot !Bundle slot of product 1's benchmark frame (0=Brent 1=WTI 2=NBP 3=TTF).
+#benchmark-2-slot !Bundle slot of product 2's benchmark frame; inert when product-2-fn is 'product-2-off.
+#asset-slot !Bundle slot of the asset metahash frame (4 in the /context/v1 bundle).
+#asset-id !This order's royalty token address; must equal asset frame row 1 and be one side of the live pair.
+#product-2-fn !Product 2 contribution: 'product-2-live reads a second benchmark slot, 'product-2-off returns 0.
 
 #target-io-fn !Function computing the quoted io ratio (sell floor or buy inverse).
 
@@ -613,49 +662,165 @@ gui:
 #hard-ceiling !Never buy above this $/token (must be > 0; set very large to disable).
 
 /* ==========================================================
-   CURVE-NPV PRICING (identical core to oil-token-curve-npv-dca.rain)
-   Strip prices arrive as an oracle-signed context frame (see
-   #frame-guards); freshness/signer/pair/meta checks are frame-level
-   there. Every weighted bucket enforces the sanity band; buckets with
-   zero interpolated weight skip it (Rainlang evaluates eagerly, and
-   drained/disabled buckets carry price 0 which must not trip the band).
-   ========================================================== */
+   ALBION CURVE ORACLE -- AS-BUILT CONTRACT
+   Normative: albionlabs/albion.oracle-server README.md + src/oracle.rs.
+   Rationale: design spec s16 (supersedes s15's 19-row single frame).
 
-/* Albion curve frame, schema v1 -- one signed context array (19 rows,
-   all bytes32) attached by the taker to takeOrders4/quote2 and
-   signature-verified by the orderbook against the trusted signer:
-     row 0     : schema version (= 1)
-     row 1     : input token address (left-padded bytes32)
-     row 2     : output token address (left-padded bytes32)
-     row 3     : issued-at, unix seconds
-     row 4     : expires-at, unix seconds
-     row 5     : metaHash of the canonical asset metadata
-     row 6     : benchmark-1 id (1=Brent 2=WTI 3=NBP 4=TTF)
-     row 7     : base-year (absolute calendar year of row 8)
-     rows 8-12 : benchmark-1 prices, base-year+0 .. +4 (USD)
-     row 13    : benchmark-2 id (0 = none)
-     rows 14-18: benchmark-2 prices, base-year+0 .. +4 (0s when row 13 = 0)
-   Rows are pinned positionally: signed-context operands are parse-time
-   literals (no dynamic indexing in Rainlang), so year alignment is
-   enforced by requiring row 7 == year-0.
+   POST /context/v1 returns a FIXED positional bundle of FIVE
+   independently signed SignedContextV1 frames. The taker attaches the
+   whole bundle to takeOrders4 / quote2 and the orderbook verifies EACH
+   frame's signature, so unused slots still cost one signature check.
+
+     slot 0   Brent benchmark frame    schema v2, 10 rows
+     slot 1   WTI   benchmark frame    schema v2, 10 rows
+     slot 2   NBP   benchmark frame    schema v2, 10 rows
+     slot 3   TTF   benchmark frame    schema v2, 10 rows
+     slot 4   asset metahash frame     schema v3,  5 rows
+
+   benchmark frame -- every row Rain DecimalFloat
+     row 0   schema version (= 2)
+     row 1   benchmark id: 1=Brent 2=WTI 3=NBP 4=TTF
+     row 2   issued-at, unix seconds of the SETTLEMENT data, not serve time
+     row 3   expires-at = issued-at + validity_window_secs (96h in prod)
+     row 4   base_year -- the CURRENT UTC YEAR at request time
+     row 5   Bal/Cal price for base_year + 0, USD-normalised
+     row 6   Cal price for base_year + 1
+     row 7   Cal price for base_year + 2
+     row 8   Cal price for base_year + 3
+     row 9   Cal price for base_year + 4
+
+   asset metahash frame
+     row 0   schema version (= 3)                          DecimalFloat
+     row 1   asset token address, left-padded               raw bytes32
+     row 2   metaHash, zero when unknown to Goldsky         raw bytes32
+     row 3   issued-at, unix seconds of the GOLDSKY read    DecimalFloat
+     row 4   expires-at                                     DecimalFloat
+
+   Benchmark frames carry no token rows and no asset identity: a Brent
+   frame is generic market data, valid for every Brent-linked order on
+   any pair and any orderbook (spec D14). Replay across assets is
+   intended, not an attack, so the v3 pair-bind on rows 1/2 is gone and
+   asset binding lives entirely on slot 4.
+
+   Rainlang has no dynamic indexing -- signed-context<C R>() resolves
+   BOTH operands at parse time. `benchmark-slot` / `asset-slot` are
+   dotrain bindings, substituted textually before parsing, so they are
+   legal in operand position and the slot is pinned per scenario
+   (spec s16.4(c) option (i)).
+
    NOTE: no using-words-from here -- the on-chain parser accepts the
-   pragma only at the top of the composed document, so it lives in the
-   #calculate-io entrypoint and covers every called function. */
+   pragma only at the top of a composed document, so it lives in the
+   entrypoints and covers every called function. */
 #frame-guards
-:ensure(equal-to(signer<0>() oracle-signer) "untrusted signer"),
-:ensure(equal-to(signed-context<0 0>() oracle-schema-version) "frame schema"),
-:ensure(equal-to(signed-context<0 1>() input-token()) "frame input token"),
-:ensure(equal-to(signed-context<0 2>() output-token()) "frame output token"),
-issued: signed-context<0 3>(),
-:ensure(greater-than-or-equal-to(now() issued) "frame from future"),
-:ensure(less-than-or-equal-to(now() signed-context<0 4>()) "frame expired"),
-:ensure(less-than(sub(now() issued) oracle-price-timeout) "frame too old"),
-:ensure(equal-to(signed-context<0 5>() meta-hash) "meta-revised"),
-:ensure(equal-to(signed-context<0 6>() benchmark-id) "benchmark mismatch"),
-:ensure(equal-to(signed-context<0 7>() year-0) "base-year mismatch"),
-:ensure(equal-to(signed-context<0 13>() benchmark-2-id) "benchmark2 mismatch");
+/* --- benchmark slot ---
+   Signature verification is per signed context: slot 0's authenticity
+   says nothing about slot 4, so every consumed slot carries its own
+   signer equality. The row-1 id check pins the SERIES on top of the slot
+   position, so a server-side bundle reorder cannot silently swap Brent
+   for TTF at a fixed slot. */
+:ensure(
+  equal-to(signer<benchmark-slot>() oracle-signer)
+  "benchmark: untrusted signer"
+),
+:ensure(
+  equal-to(signed-context<benchmark-slot 0>() benchmark-schema-version)
+  "benchmark: frame schema"
+),
+:ensure(
+  equal-to(signed-context<benchmark-slot 1>() benchmark-id)
+  "benchmark: wrong series"
+),
+bm-issued: signed-context<benchmark-slot 2>(),
+:ensure(
+  greater-than-or-equal-to(now() bm-issued)
+  "benchmark: frame from future"
+),
+:ensure(
+  less-than-or-equal-to(now() signed-context<benchmark-slot 3>())
+  "benchmark: frame expired"
+),
+:ensure(
+  less-than(sub(now() bm-issued) oracle-price-timeout)
+  "benchmark: frame too old"
+),
 
-/* Piecewise-linear interpolation across the 5 segments of one bucket. */
+/* --- asset metahash slot ---
+   Runs on the Goldsky read clock, which is independent of the settlement
+   clock above, so it is checked separately rather than folded in. An
+   asset unknown to Goldsky yields a zero hash row, never an HTTP error
+   (spec D18): the equality below then fails and the order halts.
+   DecimalFloat 0 and raw zero bytes32 coincide, so the halt fires
+   whichever way the row is interpreted.
+
+   CAVEAT on equal-to over raw bytes32 (spec s15 item 5, carried forward
+   verbatim by s16.4(b)): `equal-to` has DecimalFloat NUMERIC semantics,
+   not bitwise. Rows 1 and 2 are raw bytes32, so these are numeric
+   comparisons of bytes reinterpreted as DecimalFloat -- top 4 bytes
+   exponent, low 28 bytes coefficient. Acceptable because the frame is
+   signed by the trusted key: producing a numerically-equal but
+   bitwise-different metaHash requires our own server to sign it, and the
+   failure mode is a MISSED halt bounded by the price bands, never a
+   wrong price. The address rows are safe unconditionally -- a
+   left-padded 20-byte address has a zero exponent field, so numeric
+   equality there is exact. st0x ships the same equal-to-on-bytes32
+   pattern in production (st0x-oracle-limit-v4.rain rows 6/7).
+   TODO(review): `binary-equal-to` ("1 if all inputs are equal, 0
+   otherwise. Equality is binary." --
+   rain.interpreter/src/lib/op/LibAllStandardOps.sol) would remove the
+   caveat on row 2 entirely. It is NOT used here because this template has
+   not been parsed against the deployed Base parser, so its availability
+   there is unverified. */
+:ensure(
+  equal-to(signer<asset-slot>() oracle-signer)
+  "asset: untrusted signer"
+),
+:ensure(
+  equal-to(signed-context<asset-slot 0>() asset-schema-version)
+  "asset: frame schema"
+),
+:ensure(
+  equal-to(signed-context<asset-slot 1>() asset-id)
+  "asset: wrong asset"
+),
+/* Tie the baked asset id to the live pair, so slot 4 cannot be satisfied
+   by a frame minted for some other pair (spec s16.4(b)). */
+:ensure(
+  any(
+    equal-to(asset-id input-token())
+    equal-to(asset-id output-token())
+  )
+  "asset: not in this pair"
+),
+:ensure(
+  equal-to(signed-context<asset-slot 2>() meta-hash)
+  "meta-revised"
+),
+asset-issued: signed-context<asset-slot 3>(),
+:ensure(
+  greater-than-or-equal-to(now() asset-issued)
+  "asset: frame from future"
+),
+:ensure(
+  less-than-or-equal-to(now() signed-context<asset-slot 4>())
+  "asset: frame expired"
+),
+:ensure(
+  less-than(sub(now() asset-issued) oracle-price-timeout)
+  "asset: frame too old"
+);
+
+/* Piecewise-linear interpolation across the 5 segments of one bucket.
+   Unchanged from the v1 template except the `conditions` default.
+
+   `conditions` reverts when no condition matches, and an ODD input count
+   makes the trailing item the REVERT REASON, not a default:
+   rain.interpreter/src/lib/op/logic/LibOpConditions.sol --
+   `if oddInputs { reason := mload(end) }`. The v1 form ended in a bare
+   `v4` (11 inputs), so seg-index 4 -- reached for every t-frac in
+   [0.8, 1] -- reverted with "v4" as the message instead of returning the
+   last segment. The default is now an explicit `1 v4` PAIR, keeping the
+   input count even. Same latent defect exists in the shipped
+   oil-token-projection-npv-dca.rain #bbl-remaining-per-token. */
 #bucket-interp
 bp-a bp-b bp-c bp-d bp-e bp-f seg-index within:,
 v0: add(bp-a mul(sub(bp-b bp-a) within)),
@@ -668,59 +833,187 @@ _: conditions(
      less-than(seg-index 2) v1
      less-than(seg-index 3) v2
      less-than(seg-index 4) v3
-     v4
+     1 v4
    );
 
-/* One bucket's contribution to fair value. The bucket's frame price is
-   read once in #curve-npv-floor and passed in. The sanity-band check is
-   skipped when the bucket's interpolated weight is zero (zeroed product
-   2, drained past-year buckets carry price 0 which must not trip the
-   band -- Rainlang evaluates eagerly). Freshness is frame-level in
-   #frame-guards. A single shared ensure message is used across buckets
-   to keep this a shared function. */
+/* Select the strip row for one bucket's bound calendar year by OFFSET
+   from the signed base_year (spec s16.4(a)).
+
+   base_year is the server's current UTC year, derived per request and
+   never configured, so it rolls at 00:00 UTC on 1 January while the
+   bucket years stay frozen at deploy. The v1 guard
+   `ensure(equal-to(signed-context<0 7>() year-0))` was therefore a time
+   bomb: every order deployed in 2026 would halt on 2027-01-01.
+
+   The row INDEX still cannot be computed -- signed-context operands are
+   parse-time -- but the CHOICE among five parse-time rows can be made at
+   run time. Hence a static five-way dispatch on `year == base + i`,
+   factored as one shared function invoked once per bucket.
+
+   A year outside [base, base+4] has no published row: the server emits 0
+   for a strip year below base_year and never back-fills (spec D16). Such
+   a year falls through to the `1 0` default PAIR and returns price 0.
+   That default is load-bearing -- without it `conditions` would REVERT on
+   any past-year bucket and reintroduce the New Year's Day halt. The
+   s16.4(a) snippet omits it; this is a deliberate deviation. The 0 is
+   never actually used, because #bucket-contribution clamps those buckets
+   to zero weight. */
+#price-for-year
+base year p0 p1 p2 p3 p4:,
+_: conditions(
+     equal-to(year base) p0
+     equal-to(year add(base 1)) p1
+     equal-to(year add(base 2)) p2
+     equal-to(year add(base 3)) p3
+     equal-to(year add(base 4)) p4
+     1 0
+   );
+
+/* One bucket's contribution to fair value. Its strip price and liveness
+   are resolved by the caller and passed in.
+
+   `live` is the past-year clamp mandated by spec s16.4(a): a bucket whose
+   bound calendar year has fallen below base_year has no published row, so
+   its weight is FORCED to zero rather than merely assumed to have
+   drained. What that discards is bounded by one breakpoint interval
+   (~5 months at K=6 over 24 months) of a bucket already drained to
+   near-zero -- a marginal under-valuation, deliberately preferred over
+   halting every order on 1 January. The s4/s6 previous-year republish
+   grace period is void, and s13 open question 7 with it.
+
+   The sanity band is enforced on every WEIGHTED bucket and skipped at
+   zero weight (D11): Rainlang evaluates eagerly, and drained, clamped or
+   disabled buckets carry price 0, which must not be allowed to trip the
+   band and halt the whole order. A single shared ensure message keeps
+   this a shared function. */
 #bucket-contribution
-price adj bp-a bp-b bp-c bp-d bp-e bp-f seg-index within:,
-weight: call<'bucket-interp>(bp-a bp-b bp-c bp-d bp-e bp-f seg-index within),
+price live adj bp-a bp-b bp-c bp-d bp-e bp-f seg-index within:,
+raw-weight: call<'bucket-interp>(bp-a bp-b bp-c bp-d bp-e bp-f seg-index within),
+weight: if(live raw-weight 0),
 in-band: every(greater-than(price price-min) less-than(price price-max)),
 :ensure(any(is-zero(weight) in-band) "bucket price out of band"),
 _: mul(weight max(0 sub(price adj)));
 
-/* Fair value at now(): each bucket's interpolated discounted-unit
-   weight, priced at the frame's strip rows. Terminal buckets (c5/d5)
-   reuse the year-4 price (frame rows 12 / 18) -- the same
-   strip-then-flat convention as before. Subparser words resolve via the
-   #calculate-io entrypoint's document-top using-words-from pragma. */
+/* Product 2, live: a second benchmark series read from its own bundle
+   slot. A second signed frame inherits no trust from the first, so the
+   FULL guard set runs again here (spec s16.4(b): per-frame signer,
+   schema, series id and freshness).
+
+   Bound via #product-2-fn so that single-product scenarios compile
+   without this source at all and pay none of its cost -- spec s16.4(c):
+   "product 2 is disabled by simply not reading a second slot in that
+   scenario". The old benchmark-2-id = 0 sentinel no longer works,
+   because there is no all-zero row to read. */
+#product-2-live
+base seg-index within:,
+:ensure(
+  equal-to(signer<benchmark-2-slot>() oracle-signer)
+  "benchmark2: untrusted signer"
+),
+:ensure(
+  equal-to(signed-context<benchmark-2-slot 0>() benchmark-schema-version)
+  "benchmark2: frame schema"
+),
+:ensure(
+  equal-to(signed-context<benchmark-2-slot 1>() benchmark-2-id)
+  "benchmark2: wrong series"
+),
+bm2-issued: signed-context<benchmark-2-slot 2>(),
+:ensure(
+  greater-than-or-equal-to(now() bm2-issued)
+  "benchmark2: frame from future"
+),
+:ensure(
+  less-than-or-equal-to(now() signed-context<benchmark-2-slot 3>())
+  "benchmark2: frame expired"
+),
+:ensure(
+  less-than(sub(now() bm2-issued) oracle-price-timeout)
+  "benchmark2: frame too old"
+),
+/* Both benchmark frames are built in the same request from the same
+   clock, so their base years agree -- assert it rather than assume it,
+   since the two rows drive independent year dispatches. */
+:ensure(
+  equal-to(signed-context<benchmark-2-slot 4>() base)
+  "benchmark2: base year"
+),
+q0: signed-context<benchmark-2-slot 5>(),
+q1: signed-context<benchmark-2-slot 6>(),
+q2: signed-context<benchmark-2-slot 7>(),
+q3: signed-context<benchmark-2-slot 8>(),
+q4: signed-context<benchmark-2-slot 9>(),
+qy0: call<'price-for-year>(base year-0 q0 q1 q2 q3 q4),
+qy1: call<'price-for-year>(base year-1 q0 q1 q2 q3 q4),
+qy2: call<'price-for-year>(base year-2 q0 q1 q2 q3 q4),
+qy3: call<'price-for-year>(base year-3 q0 q1 q2 q3 q4),
+qy4: call<'price-for-year>(base year-4 q0 q1 q2 q3 q4),
+live0: greater-than-or-equal-to(year-0 base),
+live1: greater-than-or-equal-to(year-1 base),
+live2: greater-than-or-equal-to(year-2 base),
+live3: greater-than-or-equal-to(year-3 base),
+live4: greater-than-or-equal-to(year-4 base),
+d0: call<'bucket-contribution>(qy0 live0 net-price-adjustment-2 db2-y0-bp0 db2-y0-bp1 db2-y0-bp2 db2-y0-bp3 db2-y0-bp4 db2-y0-bp5 seg-index within),
+d1: call<'bucket-contribution>(qy1 live1 net-price-adjustment-2 db2-y1-bp0 db2-y1-bp1 db2-y1-bp2 db2-y1-bp3 db2-y1-bp4 db2-y1-bp5 seg-index within),
+d2: call<'bucket-contribution>(qy2 live2 net-price-adjustment-2 db2-y2-bp0 db2-y2-bp1 db2-y2-bp2 db2-y2-bp3 db2-y2-bp4 db2-y2-bp5 seg-index within),
+d3: call<'bucket-contribution>(qy3 live3 net-price-adjustment-2 db2-y3-bp0 db2-y3-bp1 db2-y3-bp2 db2-y3-bp3 db2-y3-bp4 db2-y3-bp5 seg-index within),
+d4: call<'bucket-contribution>(qy4 live4 net-price-adjustment-2 db2-y4-bp0 db2-y4-bp1 db2-y4-bp2 db2-y4-bp3 db2-y4-bp4 db2-y4-bp5 seg-index within),
+d5: call<'bucket-contribution>(qy4 live4 net-price-adjustment-2 db2-y5-bp0 db2-y5-bp1 db2-y5-bp2 db2-y5-bp3 db2-y5-bp4 db2-y5-bp5 seg-index within),
+_: add(add(add(d0 d1) add(d2 d3)) add(d4 d5));
+
+/* Product 2, disabled. Inputs are accepted and ignored so the call site
+   in #curve-npv-floor is identical either way. */
+#product-2-off
+base seg-index within:,
+_: 0;
+
+/* Fair value at now(): each bucket's interpolated discounted-unit weight,
+   priced at the strip row for that bucket's own calendar year, selected
+   by offset from the signed base_year.
+
+   The terminal buckets (c5 / d5) reuse year-4's price and liveness --
+   strip-then-flat, unchanged in substance from v1, except that "the last
+   strip year" is now resolved dynamically instead of pinned to a
+   deploy-time row index.
+
+   The zero fair-value ensure is a give-away guard: once every bucket has
+   drained or been clamped past, a sell order would otherwise quote the
+   hard floor (default 0) for the whole vault. Halting is the correct
+   outcome, and it gives a readable revert instead of the `inv` divide by
+   zero the buy orientation would hit. The `curve-expired` guard in
+   #calculate-io bounds how far past deploy this can be reached. */
 #curve-npv-floor
-p1-y0: signed-context<0 8>(),
-p1-y1: signed-context<0 9>(),
-p1-y2: signed-context<0 10>(),
-p1-y3: signed-context<0 11>(),
-p1-y4: signed-context<0 12>(),
-p2-y0: signed-context<0 14>(),
-p2-y1: signed-context<0 15>(),
-p2-y2: signed-context<0 16>(),
-p2-y3: signed-context<0 17>(),
-p2-y4: signed-context<0 18>(),
+base: signed-context<benchmark-slot 4>(),
+p0: signed-context<benchmark-slot 5>(),
+p1: signed-context<benchmark-slot 6>(),
+p2: signed-context<benchmark-slot 7>(),
+p3: signed-context<benchmark-slot 8>(),
+p4: signed-context<benchmark-slot 9>(),
+py0: call<'price-for-year>(base year-0 p0 p1 p2 p3 p4),
+py1: call<'price-for-year>(base year-1 p0 p1 p2 p3 p4),
+py2: call<'price-for-year>(base year-2 p0 p1 p2 p3 p4),
+py3: call<'price-for-year>(base year-3 p0 p1 p2 p3 p4),
+py4: call<'price-for-year>(base year-4 p0 p1 p2 p3 p4),
+live0: greater-than-or-equal-to(year-0 base),
+live1: greater-than-or-equal-to(year-1 base),
+live2: greater-than-or-equal-to(year-2 base),
+live3: greater-than-or-equal-to(year-3 base),
+live4: greater-than-or-equal-to(year-4 base),
 elapsed: sub(now() start-time),
 t-frac: min(div(elapsed bp-horizon) 1),
 scaled: mul(t-frac 5),
 seg-index: floor(scaled),
 within: frac(scaled),
-c0: call<'bucket-contribution>(p1-y0 net-price-adjustment db-y0-bp0 db-y0-bp1 db-y0-bp2 db-y0-bp3 db-y0-bp4 db-y0-bp5 seg-index within),
-c1: call<'bucket-contribution>(p1-y1 net-price-adjustment db-y1-bp0 db-y1-bp1 db-y1-bp2 db-y1-bp3 db-y1-bp4 db-y1-bp5 seg-index within),
-c2: call<'bucket-contribution>(p1-y2 net-price-adjustment db-y2-bp0 db-y2-bp1 db-y2-bp2 db-y2-bp3 db-y2-bp4 db-y2-bp5 seg-index within),
-c3: call<'bucket-contribution>(p1-y3 net-price-adjustment db-y3-bp0 db-y3-bp1 db-y3-bp2 db-y3-bp3 db-y3-bp4 db-y3-bp5 seg-index within),
-c4: call<'bucket-contribution>(p1-y4 net-price-adjustment db-y4-bp0 db-y4-bp1 db-y4-bp2 db-y4-bp3 db-y4-bp4 db-y4-bp5 seg-index within),
-c5: call<'bucket-contribution>(p1-y4 net-price-adjustment db-y5-bp0 db-y5-bp1 db-y5-bp2 db-y5-bp3 db-y5-bp4 db-y5-bp5 seg-index within),
-d0: call<'bucket-contribution>(p2-y0 net-price-adjustment-2 db2-y0-bp0 db2-y0-bp1 db2-y0-bp2 db2-y0-bp3 db2-y0-bp4 db2-y0-bp5 seg-index within),
-d1: call<'bucket-contribution>(p2-y1 net-price-adjustment-2 db2-y1-bp0 db2-y1-bp1 db2-y1-bp2 db2-y1-bp3 db2-y1-bp4 db2-y1-bp5 seg-index within),
-d2: call<'bucket-contribution>(p2-y2 net-price-adjustment-2 db2-y2-bp0 db2-y2-bp1 db2-y2-bp2 db2-y2-bp3 db2-y2-bp4 db2-y2-bp5 seg-index within),
-d3: call<'bucket-contribution>(p2-y3 net-price-adjustment-2 db2-y3-bp0 db2-y3-bp1 db2-y3-bp2 db2-y3-bp3 db2-y3-bp4 db2-y3-bp5 seg-index within),
-d4: call<'bucket-contribution>(p2-y4 net-price-adjustment-2 db2-y4-bp0 db2-y4-bp1 db2-y4-bp2 db2-y4-bp3 db2-y4-bp4 db2-y4-bp5 seg-index within),
-d5: call<'bucket-contribution>(p2-y4 net-price-adjustment-2 db2-y5-bp0 db2-y5-bp1 db2-y5-bp2 db2-y5-bp3 db2-y5-bp4 db2-y5-bp5 seg-index within),
-p1: add(add(add(c0 c1) add(c2 c3)) add(c4 c5)),
-p2: add(add(add(d0 d1) add(d2 d3)) add(d4 d5)),
-fair-value: add(p1 p2),
+c0: call<'bucket-contribution>(py0 live0 net-price-adjustment db-y0-bp0 db-y0-bp1 db-y0-bp2 db-y0-bp3 db-y0-bp4 db-y0-bp5 seg-index within),
+c1: call<'bucket-contribution>(py1 live1 net-price-adjustment db-y1-bp0 db-y1-bp1 db-y1-bp2 db-y1-bp3 db-y1-bp4 db-y1-bp5 seg-index within),
+c2: call<'bucket-contribution>(py2 live2 net-price-adjustment db-y2-bp0 db-y2-bp1 db-y2-bp2 db-y2-bp3 db-y2-bp4 db-y2-bp5 seg-index within),
+c3: call<'bucket-contribution>(py3 live3 net-price-adjustment db-y3-bp0 db-y3-bp1 db-y3-bp2 db-y3-bp3 db-y3-bp4 db-y3-bp5 seg-index within),
+c4: call<'bucket-contribution>(py4 live4 net-price-adjustment db-y4-bp0 db-y4-bp1 db-y4-bp2 db-y4-bp3 db-y4-bp4 db-y4-bp5 seg-index within),
+c5: call<'bucket-contribution>(py4 live4 net-price-adjustment db-y5-bp0 db-y5-bp1 db-y5-bp2 db-y5-bp3 db-y5-bp4 db-y5-bp5 seg-index within),
+product-1: add(add(add(c0 c1) add(c2 c3)) add(c4 c5)),
+product-2: call<'product-2-fn>(base seg-index within),
+fair-value: add(product-1 product-2),
+:ensure(greater-than(fair-value 0) "no live production"),
 _: mul(fair-value price-multiplier);
 
 #curve-npv-limit-io
@@ -738,7 +1031,25 @@ _: max(inv(call<'curve-npv-floor>()) inv(hard-ceiling));
 :ensure(greater-than(price-multiplier 0) "mult>0"),
 :ensure(less-than(price-min price-max) "band min<max"),
 :ensure(greater-than(oracle-price-timeout 0) "timeout>0"),
-:ensure(greater-than(oracle-schema-version 0) "schema>0"),
+/* Schema ids live in one numbering space (spec D19) so a strategy that
+   reads the wrong bundle slot fails its row-0 ensure rather than reading
+   a price where it expected a hash. Pin both exactly. */
+:ensure(equal-to(benchmark-schema-version 2) "schema bm=2"),
+:ensure(equal-to(asset-schema-version 3) "schema asset=3"),
+/* Slot pinning must be internally consistent: the bundle is
+   [Brent, WTI, NBP, TTF, asset], so benchmark-slot = benchmark-id - 1.
+   #frame-guards re-checks the pairing against the signed row 1 at quote
+   time; this catches a bad deploy before any funds move. */
+:ensure(less-than-or-equal-to(benchmark-slot 3) "bm slot range"),
+:ensure(equal-to(asset-slot 4) "asset slot"),
+:ensure(equal-to(benchmark-slot sub(benchmark-id 1)) "bm slot/id"),
+/* Spec s7 add-order list: a zero meta-hash can never match a real
+   published hash, so it would halt on the first quote -- catch it here.
+   Written as is-zero(is-zero(x)) rather than greater-than(x 0): meta-hash
+   is a raw bytes32 whose top 4 bytes land in the DecimalFloat exponent
+   field, so an ordering comparison against it is a comparison at an
+   arbitrary exponent. `is-zero` only inspects the coefficient. */
+:ensure(is-zero(is-zero(meta-hash)) "meta-hash unset"),
 :ensure(greater-than(hard-ceiling 0) "ceiling>0"),
 :ensure(greater-than-or-equal-to(hard-floor 0) "floor>=0"),
 :ensure(greater-than-or-equal-to(benchmark-id 1) "benchmark low"),
@@ -755,6 +1066,7 @@ total-a5: add(add(add(db-y0-bp5 db-y1-bp5) add(db-y2-bp5 db-y3-bp5)) add(db-y4-b
 total2-a0: add(add(add(db2-y0-bp0 db2-y1-bp0) add(db2-y2-bp0 db2-y3-bp0)) add(db2-y4-bp0 db2-y5-bp0)),
 total2-a5: add(add(add(db2-y0-bp5 db2-y1-bp5) add(db2-y2-bp5 db2-y3-bp5)) add(db2-y4-bp5 db2-y5-bp5)),
 :ensure(any(is-zero(total2-a0) greater-than(benchmark-2-id 0)) "benchmark2 required"),
+:ensure(any(is-zero(total2-a0) equal-to(benchmark-2-slot sub(benchmark-2-id 1))) "benchmark2 slot/id"),
 :ensure(greater-than-or-equal-to(total2-a0 total2-a5) "endpoint2");
 /* No signed context exists at add time -- the metadata-revision guard
    lives in #frame-guards against the deploy-time meta-hash binding. */
