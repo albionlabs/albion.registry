@@ -216,14 +216,15 @@ keeping the input count even (10 and 12). `#bucket-interp` additionally gained a
 `rain.interpreter/src/lib/parse/LibParseState.sol:408` reverts
 `OpcodeIOOverflow` when `opInputs > 0x0F`. Both uses here are within it.
 
-**Correction to an earlier claim in this document.** The shipped
-`oil-token-projection-npv-dca.rain` `#bbl-remaining-per-token` uses a 23-input
-`conditions`. That is **above the parser's 15-input ceiling**, so it is not a
-runtime revert at `t-frac = 1` as previously written here — as written, that
-source **cannot parse at all**. Either the file was never deployed in this form,
-or the deployed Base parser differs from the interpreter source read here.
-Flagged as open question 10; it needs an on-chain check, not a code change in
-these templates.
+**Correction to an earlier claim in this document — now confirmed on-chain.**
+The shipped `oil-token-projection-npv-dca.rain` `#bbl-remaining-per-token` uses a
+23-input `conditions`. That is **above the parser's 15-input ceiling**, so it is
+not a runtime revert at `t-frac = 1` as this document originally claimed — that
+source **cannot parse at all**. Phase-2 fork testing confirmed the ceiling
+directly against the deployed Base parser: **14 inputs parse, 16 revert
+`OpcodeIOOverflow`**. So the file as written was never deployable; either it was
+never deployed in this form, or the deployed artefact differs from the source in
+the repo. Open question 10 — a live-strategy question, not a curve-NPV one.
 
 **L3 — `#bucket-interp`'s default endpoint.** With a plain `1 v4` default,
 `seg-index == 5` (i.e. `t-frac == 1`, `within == 0`) evaluates `v4` to
@@ -248,7 +249,8 @@ Paths are relative to `/Users/alastairong/Albion/albion.rest.api/lib/rain.orderb
 | `conditions` | LibAllStandardOps.sol + `src/lib/op/logic/LibOpConditions.sol` | pairwise cond/value; reverts if none match; odd input ⇒ trailing item is the revert reason; ≤15 inputs. |
 | `div` | LibAllStandardOps.sol | "Divides the first number by all other numbers. Errors if any divisor is zero." |
 | `ensure` | LibAllStandardOps.sol | "Reverts if the first input is 0… The second input is a string used as the revert reason. Has 0 outputs." |
-| `equal-to` | LibAllStandardOps.sol | "1 if all inputs are equal, 0 otherwise. **Equality is numerical.**" — the bytes32 caveat in §6 below. |
+| `equal-to` | LibAllStandardOps.sol | "1 if all inputs are equal, 0 otherwise. **Equality is numerical.**" — used for the address and benchmark rows; see §6. |
+| `binary-equal-to` | LibAllStandardOps.sol:222 (raw `eq`) | "1 if all inputs are equal, 0 otherwise. **Equality is binary.**" Used for the metaHash row only. Confirmed present on the deployed Base parser (opcode `0x1f`) by fork test. |
 | `every` | LibAllStandardOps.sol | "The last nonzero value out of all inputs, or 0 if any input is 0." |
 | `floor` | LibAllStandardOps.sol | "Floor of a number." |
 | `frac` | LibAllStandardOps.sol | "Fractional part of a number." |
@@ -285,9 +287,16 @@ invented:
 | `oracle-url:` in the order block | ST0x `strategy/st0x-oracle-limit-v4.rain` + `strategy/settings.yaml` (recovered from `albion.oracle-server` git history, blobs `6fb425c…` / `655bf99…`; also live at `ST0x-Technology/st0x-oracle-server@main`) |
 | a **numeric binding in operand position** (`signed-context<benchmark-slot 4>()`, `signer<asset-slot>()`) | **Not** previously shipped. Verified empirically — see §7. |
 
-## 6. The `equal-to`-on-raw-bytes32 caveat, restated
+## 6. The `equal-to`-on-raw-bytes32 caveat — RESOLVED for the metaHash row
 
-Carried forward verbatim from §15 item 5, and re-affirmed by §16.4(b):
+**Status: closed by fork validation.** `binary-equal-to` is confirmed present on
+the deployed Base parser (native opcode `0x1f`; verified to parse, to fill with
+the correct hash, and to revert `"meta-revised"` with a stale one), so guard 11
+now uses it and the normalisation caveat no longer applies to the metaHash row.
+The rest of this section records why the split between the two words is what it
+is, and stays relevant to anyone adding a new bytes32 comparison.
+
+The original caveat, carried from §15 item 5 and re-affirmed by §16.4(b):
 
 > `equal-to` has DecimalFloat numeric semantics, not bitwise; acceptable because
 > the frame is signed by the trusted key (collision requires our own server
@@ -302,16 +311,17 @@ Concretely, asset frame rows 1 and 2 are raw bytes32
 - **Row 1 (address) is safe unconditionally.** A left-padded 20-byte address has
   all-zero bytes 0..11, so the exponent field is 0 and numeric equality is exact.
   This is the same case st0x ships (`st0x-oracle-limit-v4.rain` rows 6/7).
-- **Row 2 (metaHash) carries the caveat.** Arbitrary 32 bytes ⇒ arbitrary
-  exponent. Two distinct hashes could in principle normalise equal; the failure
-  mode is a *missed* halt, bounded by the price bands, never a wrong price.
+- **Row 2 (metaHash) carried the caveat, and now uses `binary-equal-to`.**
+  Arbitrary 32 bytes ⇒ arbitrary exponent, so two distinct hashes could in
+  principle normalise equal. The failure mode was a *missed* halt, bounded by the
+  price bands, never a wrong price — tolerable, but a real defect, and it is now
+  gone.
 
 `binary-equal-to` ("1 if all inputs are equal, 0 otherwise. **Equality is
-binary.**", `LibAllStandardOps.sol`) would remove the caveat for row 2. It is
-**not** used, because these templates have not been parsed against the deployed
-Base rainlang parser (`0xd905B56949284Bb1d28eeFC05be78Af69cCf3668` per
-`settings.yaml`) and its availability there is unverified. Flagged as open
-question 1.
+binary.**", `LibAllStandardOps.sol:222`, raw `eq`) is now used for row 2. The
+address rows deliberately stay on `equal-to`: the zero-exponent short-circuit
+makes them exact, and `equal-to` is what interoperates with the `input-token()` /
+`output-token()` context encodings.
 
 Related: the add-order guard is written `is-zero(is-zero(meta-hash))` rather
 than `greater-than(meta-hash 0)`, precisely to avoid an *ordering* comparison at
@@ -334,13 +344,15 @@ Both templates compose cleanly, in both product-2 modes:
 
 | Template | product-2 mode | `calculate-io` doc | `handle-add-order` doc |
 |---|---|---|---|
-| limit | `'product-2-off` | OK, 11155 chars, 9 sources | OK, 2952 chars |
-| limit | `'product-2-live` | OK, 12202 chars, 9 sources | OK, 2952 chars |
-| dca | `'product-2-off` | OK, 13163 chars, 16 sources | OK, 3099 chars |
-| dca | `'product-2-live` | OK, 14221 chars, 16 sources | OK, 3099 chars |
+| limit | `'product-2-off` | OK, 11471 chars, **9 sources** | OK, 2952 chars, 2 sources |
+| limit | `'product-2-live` | OK, 12518 chars, **9 sources** | OK, 2952 chars, 2 sources |
+| dca | `'product-2-off` | OK, 13436 chars, **14 sources** | OK, 3938 chars, 2 sources |
+| dca | `'product-2-live` | OK, 14494 chars, **14 sources** | OK, 3938 chars, 2 sources |
 
-(Re-run after the review fixes in `44d37af`; the earlier run of the same suite
-on `adab302` also passed, at slightly smaller sizes.)
+(Latest run, after `33d2872`. The same suite also passed on `adab302`, `44d37af`
+and `939eb24` — but note that at `939eb24` the DCA `#calculate-io` document was
+**16 sources**, which composed cleanly and could not have parsed on chain. Source
+count is now tracked in this table for exactly that reason.)
 
 Confirmed by inspecting composed output: `signed-context<benchmark-slot 4>()`
 emits `signed-context<0 4>()`, `signer<asset-slot>()` emits `signer<4>()` — so
@@ -360,16 +372,23 @@ the frontmatter vocabulary (`raindex:`, `rainlang:`, `oracle-url:`) is accepted
 as written. The probe harness lives in the session scratchpad and is not
 committed.
 
-### NOT achieved: on-chain parse
+### Achieved (phase 2): on-chain fork validation
+
+See §7.1 for the full status table. In short: the **limit template is
+fork-validated end-to-end** against the deployed Base parser, and the **DCA
+template was parse-blocked** until the source-cap fix in `33d2872`.
+
+### What composition alone does not cover
 
 Composition validates dotrain syntax, binding resolution, `call<>` targets and
-source assembly. It does **not** invoke the Rainterpreter parser, so none of the
-following is verified:
+source assembly. It does **not** invoke the Rainterpreter parser, so on its own
+it cannot show:
 
 - word availability and **arity/operand limits** on the deployed Base parser
-  (`0xd905B5…3668`), in particular `conditions` with 12 inputs and `call` with
-  11 stack inputs;
-- expression size and stack-depth limits;
+  (`0xd905B5…3668`) — phase 2 settled these directly, see §7.1;
+- expression size, source count, and stack-depth limits — the 15-source cap that
+  blocked the DCA template is exactly this class of failure, invisible to
+  compose;
 - gas.
 
 Blocked by: no `rain` CLI in this repo's toolchain, no local anvil/Base fork set
@@ -394,6 +413,53 @@ strip values were fetched (see §1) and hand-checked against the DecimalFloat
 encoding, but no end-to-end "given this grid and this strip, io = X" assertion
 exists. §14's integration matrix — especially §16.8 item 2, a fixture crossing a
 UTC year boundary mid-deployment — is still owed.
+
+### 7.1 Validation status
+
+| Template | Compose (alpha.229) | On-chain fork | Notes |
+|---|---|---|---|
+| limit | pass, both product-2 modes | **pass, end-to-end at `939eb24`** | see below |
+| dca | pass, both product-2 modes | **was parse-blocked**; fixed in `33d2872`, re-parse owed | 16 sources vs a 15 cap |
+
+**Limit template, fork-validated at `939eb24`:**
+
+- `parse2` accepted by the deployed Base parser in both product-2 modes.
+- `addOrder4` gas **274,580**; `takeOrders4` gas **1,039,330**.
+- A real fill priced **1.11927576** against an expected **1.11927575** — agreement
+  to 1e-8, i.e. the on-chain quote reproduces the off-chain NPV.
+- **6 negative controls** all reverted with the correct `ensure` strings,
+  including the metadata-revision halt driven by a stale baked hash.
+
+**DCA template.** The composed `#calculate-io` document was 16 sources against a
+hard cap of 15 (empirically: 15 parses, 16 reverts `MaxSources`, `0xa8062841`).
+This is a limit compose cannot see — every source composed fine individually.
+`33d2872` inlines `#get-initial-time` and `#get-last-trade` at their call sites,
+taking the document to **14 sources**, one under the cap. A confirming on-chain
+parse of the DCA template is still owed.
+
+Both templates now carry a **SOURCE BUDGET** comment above the source
+definitions, stating the cap, that the composed `#calculate-io` document is what
+counts (`#handle-io` plus everything reachable through `call<>`, including the
+scenario's selected function bindings), that `#handle-add-order` composes as its
+own document, and the resulting rule: **single-call-site helpers must be inlined,
+not factored.**
+
+### 7.2 NEW BLOCKER — DISpair mismatch (out of scope for these templates)
+
+Recorded here because it gates any real deploy, and because nothing in these
+templates can fix it:
+
+> The parser pinned in this repo's `settings.yaml`
+> (`0xd905B56949284Bb1d28eeFC05be78Af69cCf3668`) emits bytecode that evaluates as
+> **garbage** on the interpreter that live Base orders actually use
+> (`0x3bF9bd…aBDC`) — unsigned-integer ops where float ops are expected, and empty
+> revert reasons. A correctly paired DISpair (deployer / interpreter / store /
+> parser) must be pinned before anything is deployed for real.
+
+Investigation is running separately. **`settings.yaml` is deliberately NOT
+touched on this branch.** Note the consequence for §7.1: the fork validation
+above establishes that the *template* is correct against its parser, not that the
+currently-pinned DISpair is the right one to deploy with.
 
 ## 8. Placeholder / unresolved values
 
@@ -527,16 +593,12 @@ in-comment as an estimate).
 
 ## 9. Open questions for review
 
-1. **`binary-equal-to` for the metaHash row — do it.** Review confirmed the word
-   **exists** in this interpreter source (`LibAllStandardOps.sol:222`, raw `eq`),
-   so the only open part is whether the deployed Base parser
-   (`0xd905B56949284Bb1d28eeFC05be78Af69cCf3668`) carries it. `equal-to`'s
-   float-normalisation caveat on an arbitrary bytes32 (§6) is a real defect, not
-   a theoretical one — it is currently fail-safe (a missed halt bounded by the
-   price bands, never a wrong price), which is why it is not being changed blind.
-   **Switch guard 11 to `binary-equal-to` in the same pass that does the on-chain
-   parse verification**, so word availability and the switch are confirmed
-   together in one round trip.
+1. ~~**`binary-equal-to` for the metaHash row.**~~ **RESOLVED — implemented in
+   `6545dfa`.** The word is confirmed present on the deployed Base parser (native
+   opcode `0x1f`), fork-verified to parse, to fill with the correct hash, and to
+   revert `"meta-revised"` with a stale one. Guard 11 now uses it; the address
+   rows stay on `equal-to` (zero-exponent short-circuit, and it interoperates
+   with the `input-token()` / `output-token()` encodings). See §6.
 2. **Where do these files live?** They are on `feat/curve-npv-strategy` in
    `albion.registry` because that is where this task was scoped, but the
    originals are `albion.dex/src/lib/strategies/`. If they stay in the registry,
@@ -568,10 +630,13 @@ in-comment as an estimate).
    unchanged, but combined with the new `fair-value > 0` halt it means the order
    offers the entire vault at the computed floor with no per-trade cap. Worth
    confirming that is still wanted for a royalty token.
-8. **`conditions` 15-input cap.** `LibOpConditions` masks the input count with
-   `0x0F`. Both uses here are within it (10 and 12), but any future extension of
-   the year dispatch past 7 pairs would silently misbehave. Worth a comment in
-   the deploy-side builder.
+8. **`conditions` 15-input cap — CONFIRMED on the deployed parser.** Source
+   analysis said `LibOpConditions` masks the input count with `0x0F`; phase 2
+   confirmed it on-chain (14 inputs parse, 16 revert `OpcodeIOOverflow`). Both
+   uses here are within it (10 and 12), but any future extension of the year
+   dispatch past 7 pairs would fail to parse. Worth a comment in the deploy-side
+   builder. Note this is a *second*, independent 15-cap alongside the 15-**source**
+   cap in §7.1 — they are unrelated limits that happen to share a number.
 9. **`oracle-price-timeout` = 96h is now the default** (H3), which makes the
    frame's own `expires-at` row the effective freshness guard and removes the
    predictable weekend halt. The cost is taker optionality (H4): within the
@@ -580,12 +645,15 @@ in-comment as an estimate).
    availability for tighter pricing and reintroduces settlement-gap halts. Is
    96h the right point on that curve, or should the server's
    `validity_window_secs` come down instead?
-10. **The shipped `oil-token-projection-npv-dca.rain` cannot parse as written**
-   (§4): its `#bbl-remaining-per-token` `conditions` takes 23 inputs, above the
-   parser's 15-input ceiling (`LibParseState.sol:408`, `OpcodeIOOverflow`). Since
-   that strategy is believed live, either it was never deployed in this form or
-   the deployed Base parser differs from the interpreter source read here.
-   **Needs an on-chain check** — pair it with open question 1's parse call.
+10. ~~**The shipped `oil-token-projection-npv-dca.rain` cannot parse as
+   written.**~~ **RESOLVED — confirmed on-chain.** Its `#bbl-remaining-per-token`
+   `conditions` takes 23 inputs, and phase 2 verified against the deployed Base
+   parser that this genuinely **cannot parse** (14 inputs OK, 16 →
+   `OpcodeIOOverflow`; `LibParseState.sol:408`). So the earlier claim in §4 of
+   this document — that it was a runtime revert at `t-frac = 1` — was wrong, and
+   the file as written was never deployable. Either it was never deployed in this
+   form, or the deployed artefact differs from the source in the repo. **Separate
+   ticket:** this is a live-strategy question, not a curve-NPV one.
 
 ## 10. Provenance of every external source used
 
